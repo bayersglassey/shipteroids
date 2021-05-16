@@ -1,0 +1,655 @@
+<html>
+<head>
+<title>Shipteroids!</title>
+<style>
+body {
+    color: #fff;
+    background-color: #000;
+}
+.canvas {
+    border: solid 1px #0f0;
+    display: inline;
+}
+.canvas-container {
+    width: 100%;
+    text-align: center;
+}
+</style>
+</head>
+<body>
+<div class="canvas-container">
+    <canvas id="canvas" class="canvas" width=600 height=600 tabindex=-1></canvas>
+</div>
+<script>
+
+'use strict';
+
+
+function linear(x0, x1, n) {
+    /* Assumes: 0 <= n <= 1 */
+    return x0 + (x1 - x0) * n;
+}
+
+function modulo(x, n) {
+    /* Returns the modulus of x / n.
+    Expects n > 0.
+
+    Example:
+
+         x | n | modulo(x, n)
+        ---+---+--------------
+         -3| 3 | 0
+         -2| 3 | 1
+         -1| 3 | 2
+          0| 3 | 0
+          1| 3 | 1
+          2| 3 | 2
+          3| 3 | 0
+    */
+    return ((x % n) + n) % n;
+}
+
+function moduloDiff(x0, x1, w) {
+    /* Difference between two numbers on the "wrapped" interval between
+    0 and w. */
+    x0 = modulo(x0, w);
+    x1 = modulo(x1, w);
+    var diff = x1 - x0;
+
+    if(diff < -w/2)return diff + w;
+    else if(diff > w/2)return diff - w;
+    else return diff;
+}
+
+class Random {
+    /* Utility functions for producing random values */
+
+    static randNumber(a, b) {
+        if(b === undefined) {
+            b = a;
+            a = 0;
+        }
+        return a + Math.random() * (b - a);
+    }
+    static randInt(a, b) {
+        return Math.floor(this.randNumber(a, b));
+    }
+    static randIntInclusive(a, b) {
+        return this.randInt(a, b + 1);
+    }
+    static choice(choices) {
+        return choices[this.randInt(choices.length)];
+    }
+}
+
+class Point {
+    /* A 2-dimensional point.
+    Can also be used to represent the width+height of a rectangle,
+    and/or represent the rectangle between (0,0) and (this.x,this.y). */
+
+    constructor(x, y) {
+        this.x = x || 0;
+        this.y = y || 0;
+    }
+    clone() {
+        return new Point(this.x, this.y);
+    }
+    set(x, y) {
+        this.x = x || 0;
+        this.y = y || 0;
+        return this;
+    }
+    copy(other) {
+        this.x = other.x;
+        this.y = other.y;
+        return this;
+    }
+    setMidpoint(other) {
+        /* Sets this to the midpoint of the a rectangle formed between
+        (0,0) and (other.x,other.y). */
+        this.x = other.x / 2;
+        this.y = other.y / 2;
+        return this;
+    }
+    setRandomWithin(other) {
+        /* Sets this to a random point within the rectangle formed between
+        (0,0) and (other.x,other.y). */
+        this.x = Random.randNumber(other.x);
+        this.y = Random.randNumber(other.y);
+        return this;
+    }
+    add(other) {
+        this.x += other.x;
+        this.y += other.y;
+        return this;
+    }
+    mul(n) {
+        this.x *= n;
+        this.y *= n;
+        return this;
+    }
+    modulo(other) {
+        /* Returns this Point modulo the rectangle between (0,0) and
+        (other.x, other.y).
+        You can think of this as constraining this Point within the
+        torus defined by the rectangle defined by other.
+        If you're into that kind of thing. O_o */
+        this.x = modulo(this.x, other.x);
+        this.y = modulo(this.y, other.y);
+        return this;
+    }
+    rotate(rot) {
+        /*
+            for(var i = 0; i < 4; i++) {
+                var p = new Point(1).rotate(Math.PI * i / 2); 
+                console.log(p);
+            }
+            // {x:  1, y:  0}
+            // {x:  0, y: -1}
+            // {x: -1, y:  0}
+            // {x:  0, y:  1}
+        */
+        var sin = Math.sin(rot);
+        var cos = Math.cos(rot);
+        var x =  this.x;
+        var y = -this.y;
+        this.x =  (x * cos - y * sin);
+        this.y = -(x * sin + y * cos);
+        return this;
+    }
+    setSpeed(speed, rot) {
+        return this.set(speed).rotate(rot);
+    }
+    addSpeed(speed, rot) {
+        var x = this.x;
+        var y = this.y;
+        this.setSpeed(speed, rot);
+        this.x += x;
+        this.y += y;
+        return this;
+    }
+}
+
+
+class Field {
+    /* Think of "field" in the sense of "playing field".
+    It's basically a rectangle within which sprites can fly around.
+    The edges of the rectangle "wrap around" (or you can say it's a
+    "torus" if you prefer). */
+
+    DEFAULT_WIDTH = 1000;
+    DEFAULT_HEIGHT = 1000;
+
+    constructor(size) {
+        size = size? size.copy(): new Point(
+            this.DEFAULT_WIDTH,
+            this.DEFAULT_HEIGHT,
+        );
+
+        this.stars = [];
+        this.entities = [];
+        this.size = size;
+
+        /* Create a canvas for rendering this Field.
+        This canvas is never attached to a parent element, we only
+        use it for drawing, then copy its image onto another canvas. */
+        this.innerCanvas = document.createElement('canvas');
+        this.innerCanvas.width = size.x;
+        this.innerCanvas.height = size.y;
+
+        /* Add some random stars */
+        var n_stars = size.x * size.y / 3000;
+        var star_vel_rot = Random.randNumber(Math.PI * 2);
+        for(var i = 0; i < n_stars; i++) {
+            var star = new Sprite(this);
+            this.stars.push(star);
+
+            star.pos.setRandomWithin(this.size);
+            star.shouldRenderTrail = true;
+            star.trailCamVel = 1;
+
+            /* Each star has a random "distance", as in, how far away it
+            is.
+            Distance is a number between 0 and 1, with higher numbers
+            meaning "further away".
+            Stars which are "further away" are darker and move slower,
+            to give a bit of parallax-ish effect. */
+            var distance = Random.randNumber(0.25, 0.75);
+            var color_component = Math.floor(255 * distance);
+            star.trailStrokeStyle = 'rgb('
+                + color_component + ','
+                + color_component + ','
+                + color_component + ')';
+            var star_speed = 2 * distance;
+            star.vel.setSpeed(star_speed, star_vel_rot);
+            star.distance = distance;
+        }
+
+        /* Sort this.stars by "distance" so that when we iterate over
+        it in render(), more distant stars are rendered first, and
+        therefore "painted over" by closer stars. */
+        this.stars.sort((s1, s2) => Math.sign(s2.distance - s1.distance));
+    }
+    addEntity(cls) {
+        var entity = new cls(this);
+        this.entities.push(entity);
+        return entity;
+    }
+    step() {
+        for(var star of this.stars) star.step();
+        for(var entity of this.entities) entity.step();
+
+        for(var i = 0; i < this.entities.length; i++) {
+            var entity = this.entities[i];
+            if(entity.pleaseRemove) {
+                this.entities.splice(i, 1);
+                i--;
+            }
+            /* TODO: figure out what to do about other possible references
+            to entity, e.g. camera.target */
+        }
+    }
+    innerRender(camera) {
+        var canvas = this.innerCanvas;
+        var ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        /* Draw a box around the field */
+        var w = this.size.x;
+        var h = this.size.y;
+        ctx.strokeStyle = '#800';
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(w, 0);
+        ctx.lineTo(w, h);
+        ctx.lineTo(0, h);
+        ctx.closePath();
+        ctx.stroke();
+
+        for(var star of this.stars) {
+            star.render(canvas, camera);
+        }
+        for(var entity of this.entities) {
+            entity.render(canvas, camera);
+        }
+    }
+    render(canvas, camera) {
+        this.innerRender(camera);
+        var innerCanvas = this.innerCanvas;
+
+        var ctx = canvas.getContext('2d');
+        var x0 = canvas.width  / 2 - camera.pos.x;
+        var y0 = canvas.height / 2 - camera.pos.y;
+
+        x0 = modulo(x0, innerCanvas.width);
+        if(x0 > 0) x0 -= innerCanvas.width;
+        y0 = modulo(y0, innerCanvas.height);
+        if(y0 > 0) y0 -= innerCanvas.height;
+
+        for(var x = x0; x < canvas.width; x += innerCanvas.width) {
+            for(var y = y0; y < canvas.height; y += innerCanvas.height) {
+                ctx.drawImage(this.innerCanvas, x, y);
+            }
+        }
+    }
+}
+
+class Particle {
+    /* Represents a thing with position and velocity.
+    It lives on a Field. */
+
+    constructor(field) {
+        this.field = field;
+        this.pos = new Point();
+        this.vel = new Point();
+    }
+    step() {
+        this.pos.add(this.vel).modulo(this.field.size);
+    }
+}
+
+class Sprite extends Particle {
+    /* Represents a Particle which can be drawn onto a <canvas>. */
+
+    constructor(field) {
+        super(field);
+        this.radius = 10;
+
+        this.shouldRenderCircle = false;
+        this.circleStrokeStyle = 'rgb(0,200,0)';
+        this.circleFillStyle   = 'rgba(255,255,255,15)';
+
+        this.shouldRenderTrail = false;
+        this.trailStart = 0;
+        this.trailEnd   = 1;
+        this.trailCamVel = 0;
+        this.trailStrokeStyle = 'rgba(255,150,0,25)';
+    }
+    render(canvas, camera) {
+        if(this.shouldRenderTrail) this.renderTrail(canvas, camera);
+        if(this.shouldRenderCircle) this.renderCircle(canvas, camera);
+    }
+    renderTrail(canvas, camera) {
+        var x0 = this.pos.x;
+        var y0 = this.pos.y;
+        var x1 = x0 - this.vel.x - camera.vel.x * this.trailCamVel;
+        var y1 = y0 - this.vel.y - camera.vel.y * this.trailCamVel;
+        var trail_x0 = linear(x0, x1, this.trailStart);
+        var trail_y0 = linear(y0, y1, this.trailStart);
+        var trail_x1 = linear(x0, x1, this.trailEnd);
+        var trail_y1 = linear(y0, y1, this.trailEnd);
+
+        var ctx = canvas.getContext('2d');
+        ctx.strokeStyle = this.trailStrokeStyle;
+        ctx.beginPath();
+        ctx.moveTo(trail_x0, trail_y0);
+        ctx.lineTo(trail_x1, trail_y1);
+        ctx.stroke();
+        return ctx;
+    }
+    renderCircle(canvas, camera) {
+        var ctx = canvas.getContext('2d');
+        ctx.strokeStyle = this.circleStrokeStyle;
+        ctx.fillStyle = this.circleFillStyle;
+        ctx.beginPath();
+        ctx.arc(this.pos.x, this.pos.y, this.radius, 0, Math.PI * 2);
+        ctx.stroke();
+        return ctx;
+    }
+}
+
+class Key {
+    /* Represents the state of a key on the keyboard */
+
+    static KEYNAMES = 'udlrxy';
+
+    constructor() {
+        this.isDown = false;
+        this.wasDown = false;
+    }
+    static createKeys() {
+        var keys = {};
+        for(var keyname of this.KEYNAMES) {
+            keys[keyname] = new this();
+        }
+        return keys;
+    }
+    copy(other) {
+        this.isDown = other.isDown;
+        this.wasDown = other.wasDown;
+    }
+    down() {
+        this.isDown = this.wasDown = true;
+    }
+    up() {
+        this.isDown = false;
+    }
+    step() {
+        this.wasDown = this.isDown;
+    }
+}
+
+class Entity extends Sprite {
+    /* An Entity is a sprite with "volition" -- it has virtual keys which
+    can be pressed, and based on their state, it can move itself. */
+
+    constructor(field) {
+        super(field);
+
+        this.rot = 0;
+        this.rot_vel = 0;
+
+        this.speed = 2;
+        this.backspeed = 1;
+        this.velmul = .9;
+        this.rotspeed = Math.PI / 25;
+        this.rotmul = .5;
+
+        this.keys = Key.createKeys();
+
+        this.age = 0;
+        this.maxAge = -1;
+        this.pleaseRemove = false;
+    }
+    step() {
+        this.vel.mul(this.velmul);
+        this.rot_vel *= this.rotmul;
+
+        this.handleKeys();
+        for(var keyname of Key.KEYNAMES) {
+            this.keys[keyname].step();
+        }
+
+        super.step();
+        this.rot += this.rot_vel;
+
+        this.age++;
+        if(this.maxAge >= 0 && this.age >= this.maxAge) {
+            this.pleaseRemove = true;
+        }
+    }
+    handleKeys() {
+        if(this.keys.u.wasDown) {
+            this.vel.addSpeed(this.speed, this.rot);
+        }
+        if(this.keys.d.wasDown) {
+            this.vel.addSpeed(-this.backspeed, this.rot);
+        }
+        if(this.keys.l.wasDown) {
+            this.rot_vel += this.rotspeed;
+        }
+        if(this.keys.r.wasDown) {
+            this.rot_vel -= this.rotspeed;
+        }
+        if(this.keys.x.wasDown) {
+            this.fireX();
+        }
+        if(this.keys.y.wasDown) {
+            this.fireY();
+        }
+    }
+    fireX() {
+        /* Subclasses can override to do something exciting */
+    }
+    fireY() {
+        /* Subclasses can override to do something exciting */
+    }
+    renderCircle(canvas, camera) {
+        super.renderCircle(canvas, camera);
+
+        /* Render a little line indicating this.rot */
+        var x0 = this.pos.x;
+        var y0 = this.pos.y;
+        var p = new Point(this.radius).rotate(this.rot);
+        var x1 = x0 + p.x;
+        var y1 = y0 + p.y;
+        var ctx = canvas.getContext('2d');
+        ctx.strokeStyle = this.circleStrokeStyle;
+        ctx.beginPath();
+        ctx.moveTo(x0, y0);
+        ctx.lineTo(x1, y1);
+        ctx.stroke();
+        return ctx;
+    }
+}
+
+class Camera extends Particle {
+    constructor(field) {
+        super(field);
+        this.target = null;
+        this.velmul = .7;
+        this.springmul = .1;
+    }
+    setTarget(target) {
+        this.target = target;
+    }
+    step() {
+        this.vel.mul(this.velmul);
+
+        if(this.target) {
+            var x0 = this.pos.x;
+            var y0 = this.pos.y;
+            var x1 = this.target.pos.x;
+            var y1 = this.target.pos.y;
+            this.vel.x += moduloDiff(x0, x1, this.field.size.x)
+                * this.springmul;
+            this.vel.y += moduloDiff(y0, y1, this.field.size.y)
+                * this.springmul;
+        }
+
+        super.step();
+    }
+}
+
+class Player {
+    constructor(entity) {
+        this.entity = entity;
+        this.keys = Key.createKeys();
+    }
+    step() {
+        for(var keyname of Key.KEYNAMES) {
+            var key = this.keys[keyname];
+            this.entity.keys[keyname].copy(key);
+            key.step();
+        }
+    }
+}
+
+class Game {
+    constructor(canvas, fieldSize) {
+        this.canvas = canvas;
+        this.field = new Field(fieldSize);
+        this.camera = new Camera(this.field);
+        this.players = [];
+        this.intervalId = 0;
+
+        canvas.addEventListener('keydown', this.onKeyDown.bind(this));
+        canvas.addEventListener('keyup', this.onKeyUp.bind(this));
+
+        /* Hashmap from keyCode values to Key instances belonging to
+        Player instances in this.players */
+        this.keysByCode = {};
+    }
+    onKeyDown(event) {
+        this.keyDown(event.keyCode);
+        event.preventDefault();
+    }
+    onKeyUp(event) {
+        this.keyUp(event.keyCode);
+        event.preventDefault();
+    }
+    mapKey(key, keyCode) {
+        this.keysByCode[keyCode] = key;
+    }
+    keyDown(keyCode) {
+        var key = this.keysByCode[keyCode];
+        if(key) key.down();
+    }
+    keyUp(keyCode) {
+        var key = this.keysByCode[keyCode];
+        if(key) key.up();
+    }
+    addShip() {
+        return this.field.addEntity(Ship);
+    }
+    addPlayer(entity) {
+        var player = new Player(entity);
+        this.players.push(player);
+        return player;
+    }
+    step() {
+        for(var player of this.players) player.step();
+        this.field.step();
+        this.camera.step();
+    }
+    render() {
+        var canvas = this.canvas;
+        var ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        this.field.render(canvas, this.camera);
+    }
+    intervalCallback() {
+        /* Callback for use with setInterval */
+        try {
+            this.step();
+            this.render();
+        } catch(ex) {
+            // Stop the same error from throwing repeatedly.
+            // Don't set this.intervalId to 0 though, for debugging
+            // purposes.
+            clearInterval(this.intervalId);
+
+            throw ex;
+        }
+    }
+    play(millis) {
+        millis = millis || 30;
+        if(this.intervalId) clearInterval(this.intervalId);
+        var callback = this.intervalCallback.bind(this);
+        this.intervalId = setInterval(callback, millis);
+    }
+    pause() {
+        if(!this.intervalId) return;
+        clearInterval(this.intervalId);
+        this.intervalId = 0;
+    }
+}
+
+class Ship extends Entity {
+    constructor(field) {
+        super(field);
+        this.shouldRenderCircle = true;
+        this.shotspeed = 7;
+    }
+    fireX() {
+        /* TODO: add cooldown, etc */
+        var shot = this.field.addEntity(Shot);
+        shot.pos.copy(this.pos).addSpeed(this.shotspeed, this.rot);
+        shot.vel.copy(this.vel).addSpeed(this.shotspeed, this.rot);
+    }
+}
+
+class Shot extends Entity {
+    constructor(field) {
+        super(field);
+        this.shouldRenderTrail = true;
+        this.maxAge = 40;
+        this.velmul = .99;
+    }
+}
+
+class Rock extends Entity {
+    constructor(field) {
+        super(field);
+        this.shouldRenderCircle = true;
+    }
+}
+
+
+var canvas = document.getElementById('canvas');
+var game = new Game(canvas);
+
+var KEY_U = 38;
+var KEY_D = 40;
+var KEY_L = 37;
+var KEY_R = 39;
+var KEY_SPACE = 32;
+
+var ship = game.addShip();
+ship.pos.setMidpoint(game.field.size);
+game.camera.setTarget(ship);
+var player = game.addPlayer(ship);
+game.mapKey(player.keys.u, KEY_U);
+game.mapKey(player.keys.d, KEY_D);
+game.mapKey(player.keys.l, KEY_L);
+game.mapKey(player.keys.r, KEY_R);
+game.mapKey(player.keys.x, KEY_SPACE);
+
+game.play();
+canvas.style.border = 'none';
+canvas.focus();
+
+
+</script>
+</body>
+</html>
