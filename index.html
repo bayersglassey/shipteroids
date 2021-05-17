@@ -25,6 +25,10 @@ body {
 'use strict';
 
 
+var VELMUL = .7;
+var ROTVELMUL = .7;
+
+
 function linear(x0, x1, n) {
     /* Assumes: 0 <= n <= 1 */
     return x0 + (x1 - x0) * n;
@@ -80,6 +84,9 @@ class Random {
     static choice(choices) {
         return choices[this.randInt(choices.length)];
     }
+    static randRotation() {
+        return this.randNumber(Math.PI * 2);
+    }
 }
 
 class Point {
@@ -98,6 +105,11 @@ class Point {
         this.x = x || 0;
         this.y = y || 0;
         return this;
+    }
+    dist(other) {
+        var dx = Math.abs(this.x - other.x);
+        var dy = Math.abs(this.y - other.y);
+        return Math.sqrt(dx * dx + dy * dy);
     }
     copy(other) {
         this.x = other.x;
@@ -121,6 +133,11 @@ class Point {
     add(other) {
         this.x += other.x;
         this.y += other.y;
+        return this;
+    }
+    addMul(other, mul) {
+        this.x += other.x * mul;
+        this.y += other.y * mul;
         return this;
     }
     mul(n) {
@@ -187,7 +204,9 @@ class Field {
         );
 
         this.stars = [];
-        this.entities = [];
+        this.ships = [];
+        this.shots = [];
+        this.rocks = [];
         this.size = size;
 
         /* Create a canvas for rendering this Field.
@@ -199,7 +218,7 @@ class Field {
 
         /* Add some random stars */
         var n_stars = size.x * size.y / 3000;
-        var star_vel_rot = Random.randNumber(Math.PI * 2);
+        var star_vel_rot = Random.randRotation();
         for(var i = 0; i < n_stars; i++) {
             var star = new Sprite(this);
             this.stars.push(star);
@@ -229,20 +248,72 @@ class Field {
         it in render(), more distant stars are rendered first, and
         therefore "painted over" by closer stars. */
         this.stars.sort((s1, s2) => Math.sign(s2.distance - s1.distance));
+
+        var n_rocks = size.x * size.y / 35000;
+        for(var i = 0; i < n_rocks; i++) {
+            var rock = this.addRock();
+        }
     }
-    addEntity(cls) {
+    addShip(cls) {
+        cls = cls || Ship;
         var entity = new cls(this);
-        this.entities.push(entity);
+        this.ships.push(entity);
+        return entity;
+    }
+    addShot(cls) {
+        cls = cls || Shot;
+        var entity = new cls(this);
+        this.shots.push(entity);
+        return entity;
+    }
+    addRock(cls) {
+        cls = cls || Rock;
+        var entity = new cls(this);
+        this.rocks.push(entity);
         return entity;
     }
     step() {
         for(var star of this.stars) star.step();
-        for(var entity of this.entities) entity.step();
+        for(var entity of this.ships) entity.step();
+        for(var entity of this.shots) entity.step();
+        for(var entity of this.rocks) entity.step();
 
-        for(var i = 0; i < this.entities.length; i++) {
-            var entity = this.entities[i];
+        for(var shot of this.shots) {
+            for(var ship of this.ships) {
+                if(shot.colliding(ship)) {
+                    shot.hit(ship);
+                }
+            }
+            for(var rock of this.rocks) {
+                if(shot.colliding(rock)) {
+                    shot.hit(rock);
+                }
+            }
+        }
+
+        for(var rock of this.rocks) {
+            for(var other of this.rocks) {
+                if(rock === other) continue;
+                if(rock.colliding(other)) {
+                    rock.handleCollision(other);
+                }
+            }
+            for(var ship of this.ships) {
+                if(rock.colliding(ship)) {
+                    rock.handleCollision(ship);
+                }
+            }
+        }
+
+        this.removeEntities(this.ships);
+        this.removeEntities(this.shots);
+        this.removeEntities(this.rocks);
+    }
+    removeEntities(entities) {
+        for(var i = 0; i < entities.length; i++) {
+            var entity = entities[i];
             if(entity.pleaseRemove) {
-                this.entities.splice(i, 1);
+                entities.splice(i, 1);
                 i--;
             }
             /* TODO: figure out what to do about other possible references
@@ -266,12 +337,10 @@ class Field {
         ctx.closePath();
         ctx.stroke();
 
-        for(var star of this.stars) {
-            star.render(canvas, camera);
-        }
-        for(var entity of this.entities) {
-            entity.render(canvas, camera);
-        }
+        for(var star of this.stars) star.render(canvas, camera);
+        for(var entity of this.ships) entity.render(canvas, camera);
+        for(var entity of this.shots) entity.render(canvas, camera);
+        for(var entity of this.rocks) entity.render(canvas, camera);
     }
     render(canvas, camera) {
         this.innerRender(camera);
@@ -304,7 +373,7 @@ class Particle {
         this.vel = new Point();
     }
     step() {
-        this.pos.add(this.vel).modulo(this.field.size);
+        this.pos.addMul(this.vel, VELMUL).modulo(this.field.size);
     }
 }
 
@@ -405,6 +474,11 @@ class Entity extends Sprite {
         this.rotspeed = Math.PI / 25;
         this.rotmul = .5;
 
+        this.cooldownX = 0;
+        this.cooldownY = 0;
+        this.maxCooldownX = 1;
+        this.maxCooldownY = 1;
+
         this.keys = Key.createKeys();
 
         this.age = 0;
@@ -415,13 +489,16 @@ class Entity extends Sprite {
         this.vel.mul(this.velmul);
         this.rot_vel *= this.rotmul;
 
+        if(this.cooldownX > 0) this.cooldownX--;
+        if(this.cooldownY > 0) this.cooldownY--;
+
         this.handleKeys();
         for(var keyname of Key.KEYNAMES) {
             this.keys[keyname].step();
         }
 
         super.step();
-        this.rot += this.rot_vel;
+        this.rot += this.rot_vel * ROTVELMUL;
 
         this.age++;
         if(this.maxAge >= 0 && this.age >= this.maxAge) {
@@ -441,11 +518,13 @@ class Entity extends Sprite {
         if(this.keys.r.wasDown) {
             this.rot_vel -= this.rotspeed;
         }
-        if(this.keys.x.wasDown) {
+        if(this.keys.x.wasDown && this.cooldownX === 0) {
             this.fireX();
+            this.cooldownX = this.maxCooldownX;
         }
-        if(this.keys.y.wasDown) {
+        if(this.keys.y.wasDown && this.cooldownY === 0) {
             this.fireY();
+            this.cooldownY = this.maxCooldownY;
         }
     }
     fireX() {
@@ -453,6 +532,39 @@ class Entity extends Sprite {
     }
     fireY() {
         /* Subclasses can override to do something exciting */
+    }
+    colliding(other) {
+        return this.pos.dist(other.pos) < this.radius + other.radius;
+    }
+    handleCollision(other) {
+        /* We collided with another Entity!
+        We are both pushed away, and take on some of each others
+        velocity. */
+
+        /* Store the two entities' velocities before we make any
+        changes to them. */
+        var vx0 = this.vel.x;
+        var vy0 = this.vel.y;
+        var vx1 = other.vel.x;
+        var vy1 = other.vel.y;
+
+        /* radiusRatio: number between 0 and 1.
+        The closer it is to 1, the larger this.radius is than other.radius.
+        If .5, they are equal. */
+        var radiusRatio = this.radius / (this.radius + other.radius);
+
+        /* Distance between this and other */
+        var dist = this.pos.dist(other.pos);
+
+        /* mx, my: vector from this.pos to other.pos */
+        var mx = other.pos.x - this.pos.x;
+        var my = other.pos.y - this.pos.y;
+
+        var velmul = .1;
+        this.vel.x  -= mx * (1 - radiusRatio) * velmul;
+        this.vel.y  -= my * (1 - radiusRatio) * velmul;
+        other.vel.x += mx * radiusRatio * velmul;
+        other.vel.y += my * radiusRatio * velmul;
     }
     renderCircle(canvas, camera) {
         super.renderCircle(canvas, camera);
@@ -469,7 +581,6 @@ class Entity extends Sprite {
         ctx.moveTo(x0, y0);
         ctx.lineTo(x1, y1);
         ctx.stroke();
-        return ctx;
     }
 }
 
@@ -549,8 +660,8 @@ class Game {
         var key = this.keysByCode[keyCode];
         if(key) key.up();
     }
-    addShip() {
-        return this.field.addEntity(Ship);
+    addShip(cls) {
+        return this.field.addShip(cls);
     }
     addPlayer(entity) {
         var player = new Player(entity);
@@ -596,14 +707,18 @@ class Game {
 }
 
 class Ship extends Entity {
+}
+
+class FighterShip extends Ship {
     constructor(field) {
         super(field);
         this.shouldRenderCircle = true;
         this.shotspeed = 7;
+        this.maxCooldownX = 2;
     }
     fireX() {
-        /* TODO: add cooldown, etc */
-        var shot = this.field.addEntity(Shot);
+        var shot = this.field.addShot(Shot);
+        shot.ship = this;
         shot.pos.copy(this.pos).addSpeed(this.shotspeed, this.rot);
         shot.vel.copy(this.vel).addSpeed(this.shotspeed, this.rot);
     }
@@ -615,13 +730,40 @@ class Shot extends Entity {
         this.shouldRenderTrail = true;
         this.maxAge = 40;
         this.velmul = .99;
+        this.radius = 5;
+
+        // The Ship who shot us out
+        this.ship = null;
+
+        // How hard we move things we hit
+        this.hitVelMul = .1;
+    }
+    hit(other) {
+        if(other === this.ship) return;
+        other.vel.addMul(this.vel, this.hitVelMul);
+        this.pleaseRemove = true;
     }
 }
 
 class Rock extends Entity {
+
+    MAX_ROT_VEL = Math.PI / 20;
+
     constructor(field) {
         super(field);
         this.shouldRenderCircle = true;
+        this.circleStrokeStyle = '#987';
+
+        this.pos.setRandomWithin(field.size);
+        this.radius = Random.randNumber(7, 25);
+
+        var speed = Random.randNumber(3.5);
+        this.vel.setSpeed(speed, Random.randRotation());
+
+        this.velmul = 1;
+        this.rotmul = 1;
+        this.rot_vel = Random.randNumber(
+            -this.MAX_ROT_VEL, this.MAX_ROT_VEL);
     }
 }
 
@@ -635,7 +777,7 @@ var KEY_L = 37;
 var KEY_R = 39;
 var KEY_SPACE = 32;
 
-var ship = game.addShip();
+var ship = game.addShip(FighterShip);
 ship.pos.setMidpoint(game.field.size);
 game.camera.setTarget(ship);
 var player = game.addPlayer(ship);
