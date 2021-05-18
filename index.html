@@ -207,6 +207,7 @@ class Field {
         this.stars = [];
         this.ships = [];
         this.shots = [];
+        this.effects = [];
         this.rocks = [];
         this.size = size;
 
@@ -267,6 +268,12 @@ class Field {
         this.shots.push(entity);
         return entity;
     }
+    addEffect(cls) {
+        cls = cls || Effect;
+        var entity = new cls(this);
+        this.effects.push(entity);
+        return entity;
+    }
     addRock(cls) {
         cls = cls || Rock;
         var entity = new cls(this);
@@ -277,6 +284,7 @@ class Field {
         for(var star of this.stars) star.step();
         for(var entity of this.ships) entity.step();
         for(var entity of this.shots) entity.step();
+        for(var entity of this.effects) entity.step();
         for(var entity of this.rocks) entity.step();
 
         for(var shot of this.shots) {
@@ -308,6 +316,7 @@ class Field {
 
         this.removeEntities(this.ships);
         this.removeEntities(this.shots);
+        this.removeEntities(this.effects);
         this.removeEntities(this.rocks);
     }
     removeEntities(entities) {
@@ -341,6 +350,7 @@ class Field {
         for(var star of this.stars) star.render(canvas, camera);
         for(var entity of this.ships) entity.render(canvas, camera);
         for(var entity of this.shots) entity.render(canvas, camera);
+        for(var entity of this.effects) entity.render(canvas, camera);
         for(var entity of this.rocks) entity.render(canvas, camera);
     }
     render(canvas, camera) {
@@ -378,6 +388,43 @@ class Particle {
     }
 }
 
+class Picture {
+    radiusmul = 1;
+
+    constructor(points, props) {
+        this.points = points || [];
+        if(props) Object.assign(this, props);
+    }
+    render(canvas, camera, entity) {
+        var pos = entity.pos;
+        var rot = entity.rot;
+        var radius = entity.radius * this.radiusmul;
+
+        // Point used for calculations
+        var p = new Point();
+
+        var ctx = canvas.getContext('2d');
+        ctx.strokeStyle = entity.circleStrokeStyle;
+        ctx.fillStyle = entity.circleFillStyle;
+        ctx.beginPath();
+
+        var firstPoint = true;
+        for(var point of this.points) {
+            p.copy(point).mul(radius).rotate(rot).add(pos);
+            if(firstPoint) {
+                ctx.moveTo(p.x, p.y);
+                firstPoint = false;
+            } else {
+                ctx.lineTo(p.x, p.y);
+            }
+        }
+
+        ctx.closePath();
+        ctx.stroke();
+        ctx.fill();
+    }
+}
+
 class Sprite extends Particle {
     /* Represents a Particle which can be drawn onto a <canvas>. */
 
@@ -385,7 +432,7 @@ class Sprite extends Particle {
 
     shouldRenderCircle = false;
     circleStrokeStyle = 'rgb(0,200,0)';
-    circleFillStyle   = 'rgba(255,255,255,15)';
+    circleFillStyle   = 'rgba(255,255,255,.15)';
 
     shouldRenderTrail = false;
     trailStart = 0;
@@ -393,9 +440,12 @@ class Sprite extends Particle {
     trailCamVel = 0;
     trailStrokeStyle = 'rgba(255,150,0,25)';
 
+    picture = null; /* instanceof Picture */
+
     render(canvas, camera) {
         if(this.shouldRenderTrail) this.renderTrail(canvas, camera);
         if(this.shouldRenderCircle) this.renderCircle(canvas, camera);
+        if(this.picture) this.picture.render(canvas, camera, this);
     }
     renderTrail(canvas, camera) {
         var x0 = this.pos.x;
@@ -413,7 +463,6 @@ class Sprite extends Particle {
         ctx.moveTo(trail_x0, trail_y0);
         ctx.lineTo(trail_x1, trail_y1);
         ctx.stroke();
-        return ctx;
     }
     renderCircle(canvas, camera) {
         var ctx = canvas.getContext('2d');
@@ -422,7 +471,7 @@ class Sprite extends Particle {
         ctx.beginPath();
         ctx.arc(this.pos.x, this.pos.y, this.radius, 0, Math.PI * 2);
         ctx.stroke();
-        return ctx;
+        ctx.fill();
     }
 }
 
@@ -467,6 +516,13 @@ class Entity extends Sprite {
     rotspeed = Math.PI / 25;
     rotmul = .5;
     maxAge = -1;
+    shotXClass = Shot;
+    shotYClass = null;
+
+    thrustEffectClass = ThrustEffect;
+    thrustEffectSpeedMul = 2;
+    thrustEffectEvery = 3;
+    thrustEffectCooldown = 0;
 
     constructor(field) {
         super(field);
@@ -488,6 +544,7 @@ class Entity extends Sprite {
 
         if(this.cooldownX > 0) this.cooldownX--;
         if(this.cooldownY > 0) this.cooldownY--;
+        if(this.thrustEffectCooldown > 0) this.thrustEffectCooldown--;
 
         this.handleKeys();
         for(var keyname of Key.KEYNAMES) {
@@ -504,10 +561,10 @@ class Entity extends Sprite {
     }
     handleKeys() {
         if(this.keys.u.wasDown) {
-            this.vel.addSpeed(this.thrustSpeed, this.rot);
+            this.thrust(this.thrustSpeed, this.rot);
         }
         if(this.keys.d.wasDown) {
-            this.vel.addSpeed(-this.reverseSpeed, this.rot);
+            this.thrust(this.reverseSpeed, this.rot + Math.PI);
         }
         if(this.keys.l.wasDown) {
             this.rot_vel += this.rotspeed;
@@ -522,11 +579,39 @@ class Entity extends Sprite {
             this.fireY();
         }
     }
+    thrust(speed, rot) {
+        this.vel.addSpeed(this.thrustSpeed, rot);
+        if(this.thrustEffectCooldown === 0) {
+            this.addThrustEffect(
+                speed * this.thrustEffectSpeedMul,
+                rot + Math.PI);
+            this.thrustEffectCooldown += this.thrustEffectEvery;
+        }
+    }
+    addThrustEffect(speed, rot) {
+        var effect = this.field.addEffect(this.thrustEffectClass);
+        effect.pos.copy(this.pos).addSpeed(this.radius, rot);
+        effect.vel.copy(this.vel).addSpeed(speed, rot);
+        effect.rot = rot;
+    }
     fireX() {
-        /* Subclasses can override to do something exciting */
+        var cls = this.shotXClass;
+        if(!cls) return;
+        var shot = this.shoot(cls);
+        this.cooldownX += shot.cooldown;
     }
     fireY() {
-        /* Subclasses can override to do something exciting */
+        var cls = this.shotYClass;
+        if(!cls) return;
+        var shot = this.shoot(cls);
+        this.cooldownY += shot.cooldown;
+    }
+    shoot(cls) {
+        var shot = this.field.addShot(cls);
+        shot.ship = this;
+        shot.pos.copy(this.pos).addSpeed(cls.initialSpeed, this.rot);
+        shot.vel.copy(this.vel).addSpeed(cls.initialSpeed, this.rot);
+        return shot;
     }
     colliding(other) {
         return this.pos.dist(other.pos) < this.radius + other.radius;
@@ -713,33 +798,25 @@ class Game {
     }
 }
 
-class Ship extends Entity {
-    shouldRenderCircle = true;
-    shotXClass = Shot;
-    shotYClass = null;
+class Effect extends Entity {
+}
 
-    fireX() {
-        var cls = this.shotXClass;
-        if(!cls) return;
-        var shot = this.shoot(cls);
-        this.cooldownX = shot.cooldown;
-    }
-    fireY() {
-        var cls = this.shotYClass;
-        if(!cls) return;
-        var shot = this.shoot(cls);
-        this.cooldownY = shot.cooldown;
-    }
-    shoot(cls) {
-        var shot = this.field.addShot(cls);
-        shot.ship = this;
-        shot.pos.copy(this.pos).addSpeed(cls.initialSpeed, this.rot);
-        shot.vel.copy(this.vel).addSpeed(cls.initialSpeed, this.rot);
-        return shot;
-    }
+class ThrustEffect extends Effect {
+    shouldRenderTrail = true;
+    trailStart = .7;
+    trailStrokeStyle = 'rgba(0,255,255,.5)';
+    maxAge = 20;
+}
+
+class Ship extends Entity {
 }
 
 class FighterShip extends Ship {
+    picture = new Picture([
+        new Point( 1,    0),
+        new Point(-1, -.75),
+        new Point(-1,  .75),
+    ], {radiusmul: 1.2});
 }
 
 class Shot extends Entity {
@@ -747,9 +824,9 @@ class Shot extends Entity {
     static initialSpeed = 14;
     maxAge = 40;
     velmul = .95;
-    radius = 2 * RADIUSMUL;
+    radius = .25 * RADIUSMUL;
     shouldRenderTrail = true;
-    cooldown = 2;
+    cooldown = 4;
 
     // How hard we move things we hit
     hitVelMul = .1;
