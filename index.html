@@ -846,13 +846,23 @@ class Shot extends Entity {
 
 class Rock extends Entity {
 
-    shouldRenderCircle = true;
     circleStrokeStyle = '#987';
     velmul = 1;
     rotmul = 1;
 
     constructor(field) {
         super(field);
+
+        var points = [];
+        var n_points = Random.randIntInclusive(5, 10);
+        for(var i = 0; i < n_points; i++) {
+            var point_rot = (Math.PI * 2)
+                * (i + Random.randNumber(-.25, .25)) / n_points;
+            var point = new Point(Random.randNumber(1, 1.1))
+                .rotate(point_rot);
+            points.push(point);
+        }
+        this.picture = new Picture(points);
 
         this.pos.setRandomWithin(field.size);
         this.radius = Random.randNumber(7, 25) * RADIUSMUL;
