@@ -753,6 +753,21 @@ class Entity extends Sprite {
         other.vel.x -= mx * r0 * velmul;
         other.vel.y -= my * r0 * velmul;
     }
+    render(canvas, camera) {
+        var fade = 1;
+        if(this.maxAge >= 0) {
+            // maxFade: don't set fade lower than 1 - maxFade, that
+            // would be too close to 0, so we wouldn't be able to see
+            // the Entity
+            var maxFade = .85;
+            fade = 1 - (this.age / this.maxAge) * maxFade;
+        }
+
+        var ctx = canvas.getContext('2d');
+        ctx.globalAlpha = fade;
+        super.render(canvas, camera);
+        ctx.globalAlpha = 1;
+    }
     renderCircle(canvas, camera, addx, addy) {
         super.renderCircle(canvas, camera, addx, addy);
 
@@ -907,6 +922,15 @@ class ThrustEffect extends Effect {
     shouldRenderTrail = true;
     trailStart = .7;
     trailStrokeStyle = 'rgba(0,255,255,.5)';
+    trailLineWidth = 3;
+    maxAge = 20;
+}
+
+class SparkEffect extends Entity {
+    shouldRenderTrail = true;
+    trailStart = .7;
+    trailStrokeStyle = 'rgba(255,255,0,.5)';
+    velmul = .95;
     maxAge = 20;
 }
 
@@ -958,6 +982,15 @@ class Shot extends Entity {
     hit(other) {
         if(other === this.ship) return;
         other.vel.addMul(this.vel, this.hitVelMul);
+
+        for(var i = 0; i < 2; i++) {
+            var spark = this.field.addEffect(SparkEffect);
+            spark.pos.copy(this.pos);
+            var speed = Random.randNumber(2, 4);
+            spark.vel.copy(this.vel).mul(.75)
+                .addSpeed(speed, Random.randRotation());
+        }
+
         this.pleaseRemove = true;
     }
 }
