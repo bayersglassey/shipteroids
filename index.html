@@ -25,6 +25,7 @@ body {
 'use strict';
 
 
+var TIMING = false;
 var VELMUL = .7;
 var ROTVELMUL = .7;
 var RADIUSMUL = 2;
@@ -136,6 +137,11 @@ class Point {
         (0,0) and (other.x,other.y). */
         this.x = Random.randNumber(other.x);
         this.y = Random.randNumber(other.y);
+        return this;
+    }
+    addxy(x, y) {
+        this.x += x;
+        this.y += y;
         return this;
     }
     add(other) {
@@ -414,8 +420,9 @@ class Picture {
         this.shapes = shapes || [];
         if(props) Object.assign(this, props);
     }
-    render(canvas, camera, entity) {
-        var pos = entity.pos;
+    render(entity, canvas, camera, addx, addy) {
+        var x0 = entity.pos.x + addx;
+        var y0 = entity.pos.y + addy;
         var rot = entity.rot;
         var radius = entity.radius * this.radiusmul;
 
@@ -431,7 +438,7 @@ class Picture {
             var firstPoint = true;
             ctx.beginPath();
             for(var point of shape.points) {
-                p.copy(point).mul(radius).rotate(rot).add(pos);
+                p.copy(point).mul(radius).rotate(rot).addxy(x0, y0);
                 if(firstPoint) {
                     ctx.moveTo(p.x, p.y);
                     firstPoint = false;
@@ -467,13 +474,25 @@ class Sprite extends Particle {
     picture = null; /* instanceof Picture */
 
     render(canvas, camera) {
-        if(this.shouldRenderTrail) this.renderTrail(canvas, camera);
-        if(this.shouldRenderCircle) this.renderCircle(canvas, camera);
-        if(this.picture) this.picture.render(canvas, camera, this);
+        var fieldx = this.field.size.x;
+        var fieldy = this.field.size.y;
+        var addx0 = this.pos.x < fieldx / 2? 0: -fieldx;
+        var addy0 = this.pos.y < fieldy / 2? 0: -fieldy;
+
+        for(var addx = addx0; addx <= addx0 + fieldx; addx += fieldx) {
+            for(var addy = addy0; addy <= addy0 + fieldy; addy += fieldy) {
+                if(this.shouldRenderTrail) this.renderTrail(
+                    canvas, camera, addx, addy);
+                if(this.shouldRenderCircle) this.renderCircle(
+                    canvas, camera, addx, addy);
+                if(this.picture) this.picture.render(
+                    this, canvas, camera, addx, addy);
+            }
+        }
     }
-    renderTrail(canvas, camera) {
-        var x0 = this.pos.x;
-        var y0 = this.pos.y;
+    renderTrail(canvas, camera, addx, addy) {
+        var x0 = this.pos.x + addx;
+        var y0 = this.pos.y + addy;
         var x1 = x0 - this.vel.x - camera.vel.x * this.trailCamVel;
         var y1 = y0 - this.vel.y - camera.vel.y * this.trailCamVel;
         var trail_x0 = linear(x0, x1, this.trailStart);
@@ -489,13 +508,15 @@ class Sprite extends Particle {
         ctx.lineTo(trail_x1, trail_y1);
         ctx.stroke();
     }
-    renderCircle(canvas, camera) {
+    renderCircle(canvas, camera, addx, addy) {
+        var x0 = this.pos.x + addx;
+        var y0 = this.pos.y + addy;
         var ctx = canvas.getContext('2d');
         ctx.strokeStyle = this.circleStrokeStyle;
         ctx.lineWidth = this.circleLineWidth;
         ctx.fillStyle = this.circleFillStyle;
         ctx.beginPath();
-        ctx.arc(this.pos.x, this.pos.y, this.radius, 0, Math.PI * 2);
+        ctx.arc(x0, y0, this.radius, 0, Math.PI * 2);
         ctx.stroke();
         ctx.fill();
     }
@@ -732,12 +753,12 @@ class Entity extends Sprite {
         other.vel.x -= mx * r0 * velmul;
         other.vel.y -= my * r0 * velmul;
     }
-    renderCircle(canvas, camera) {
-        super.renderCircle(canvas, camera);
+    renderCircle(canvas, camera, addx, addy) {
+        super.renderCircle(canvas, camera, addx, addy);
 
         /* Render a little line indicating this.rot */
-        var x0 = this.pos.x;
-        var y0 = this.pos.y;
+        var x0 = this.pos.x + addx;
+        var y0 = this.pos.y + addy;
         var p = new Point(this.radius).rotate(this.rot);
         var x1 = x0 + p.x;
         var y1 = y0 + p.y;
@@ -849,6 +870,7 @@ class Game {
     }
     intervalCallback() {
         /* Callback for use with setInterval */
+        if(TIMING) var t0 = new Date();
         try {
             this.step();
             this.render();
@@ -859,6 +881,10 @@ class Game {
             clearInterval(this.intervalId);
 
             throw ex;
+        }
+        if(TIMING) {
+            var t1 = new Date();
+            console.log('TIMING: ' + String(t1 - t0));
         }
     }
     play(millis) {
