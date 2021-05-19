@@ -222,12 +222,10 @@ class Field {
         var n_stars = size.x * size.y / 3000;
         var star_vel_rot = Random.randRotation();
         for(var i = 0; i < n_stars; i++) {
-            var star = new Sprite(this);
+            var star = new Star(this);
             this.stars.push(star);
 
             star.pos.setRandomWithin(this.size);
-            star.shouldRenderTrail = true;
-            star.trailCamVel = 1;
 
             /* Each star has a random "distance", as in, how far away it
             is.
@@ -388,11 +386,25 @@ class Particle {
     }
 }
 
-class Picture {
-    radiusmul = 1;
+class Shape {
+    /* Specifies a polygon to draw on a canvas.
+    Each Picture can have multiple Shapes. */
+
+    stroke = true;
+    fill = true;
+    close = true;
 
     constructor(points, props) {
         this.points = points || [];
+        if(props) Object.assign(this, props);
+    }
+}
+
+class Picture {
+    radiusmul = 1;
+
+    constructor(shapes, props) {
+        this.shapes = shapes || [];
         if(props) Object.assign(this, props);
     }
     render(canvas, camera, entity) {
@@ -405,23 +417,26 @@ class Picture {
 
         var ctx = canvas.getContext('2d');
         ctx.strokeStyle = entity.circleStrokeStyle;
+        ctx.lineWidth = entity.circleLineWidth;
         ctx.fillStyle = entity.circleFillStyle;
-        ctx.beginPath();
 
-        var firstPoint = true;
-        for(var point of this.points) {
-            p.copy(point).mul(radius).rotate(rot).add(pos);
-            if(firstPoint) {
-                ctx.moveTo(p.x, p.y);
-                firstPoint = false;
-            } else {
-                ctx.lineTo(p.x, p.y);
+        for(var shape of this.shapes) {
+            var firstPoint = true;
+            ctx.beginPath();
+            for(var point of shape.points) {
+                p.copy(point).mul(radius).rotate(rot).add(pos);
+                if(firstPoint) {
+                    ctx.moveTo(p.x, p.y);
+                    firstPoint = false;
+                } else {
+                    ctx.lineTo(p.x, p.y);
+                }
             }
+            if(shape.close) ctx.closePath();
+            if(shape.stroke) ctx.stroke();
+            if(shape.fill) ctx.fill();
         }
 
-        ctx.closePath();
-        ctx.stroke();
-        ctx.fill();
     }
 }
 
@@ -433,12 +448,14 @@ class Sprite extends Particle {
     shouldRenderCircle = false;
     circleStrokeStyle = 'rgb(0,200,0)';
     circleFillStyle   = 'rgba(255,255,255,.15)';
+    circleLineWidth = 2;
 
     shouldRenderTrail = false;
     trailStart = 0;
     trailEnd   = 1;
     trailCamVel = 0;
     trailStrokeStyle = 'rgba(255,150,0,25)';
+    trailLineWidth = 2;
 
     picture = null; /* instanceof Picture */
 
@@ -459,6 +476,7 @@ class Sprite extends Particle {
 
         var ctx = canvas.getContext('2d');
         ctx.strokeStyle = this.trailStrokeStyle;
+        ctx.lineWidth = this.trailLineWidth;
         ctx.beginPath();
         ctx.moveTo(trail_x0, trail_y0);
         ctx.lineTo(trail_x1, trail_y1);
@@ -467,12 +485,19 @@ class Sprite extends Particle {
     renderCircle(canvas, camera) {
         var ctx = canvas.getContext('2d');
         ctx.strokeStyle = this.circleStrokeStyle;
+        ctx.lineWidth = this.circleLineWidth;
         ctx.fillStyle = this.circleFillStyle;
         ctx.beginPath();
         ctx.arc(this.pos.x, this.pos.y, this.radius, 0, Math.PI * 2);
         ctx.stroke();
         ctx.fill();
     }
+}
+
+class Star extends Sprite {
+    shouldRenderTrail = true;
+    trailLineWidth = 1;
+    trailCamVel = 1;
 }
 
 class Key {
@@ -511,13 +536,17 @@ class Entity extends Sprite {
     can be pressed, and based on their state, it can move itself. */
 
     thrustSpeed = 2;
-    reverseSpeed = 1;
+    reverseSpeed = .75;
     velmul = .95;
     rotspeed = Math.PI / 25;
     rotmul = .5;
     maxAge = -1;
-    shotXClass = Shot;
-    shotYClass = null;
+
+    SHOT_KEYNAMES = 'xy';
+    shotClass = {
+        x: Shot,
+        y: null,
+    };
 
     thrustEffectClass = ThrustEffect;
     thrustEffectSpeedMul = 2;
@@ -530,8 +559,13 @@ class Entity extends Sprite {
         this.rot = 0;
         this.rot_vel = 0;
 
-        this.cooldownX = 0;
-        this.cooldownY = 0;
+        this.shotprops = {};
+        for(var keyname of this.SHOT_KEYNAMES) {
+            this.shotprops[keyname] = {
+                cooldown: 0,
+                n_shots: 0,
+            };
+        };
 
         this.keys = Key.createKeys();
 
@@ -542,8 +576,10 @@ class Entity extends Sprite {
         this.vel.mul(this.velmul);
         this.rot_vel *= this.rotmul;
 
-        if(this.cooldownX > 0) this.cooldownX--;
-        if(this.cooldownY > 0) this.cooldownY--;
+        for(var keyname of this.SHOT_KEYNAMES) {
+            var shotprops = this.shotprops[keyname];
+            if(shotprops.cooldown > 0) shotprops.cooldown--;
+        }
         if(this.thrustEffectCooldown > 0) this.thrustEffectCooldown--;
 
         this.handleKeys();
@@ -572,11 +608,11 @@ class Entity extends Sprite {
         if(this.keys.r.wasDown) {
             this.rot_vel -= this.rotspeed;
         }
-        if(this.keys.x.wasDown && this.cooldownX === 0) {
-            this.fireX();
-        }
-        if(this.keys.y.wasDown && this.cooldownY === 0) {
-            this.fireY();
+        for(var keyname of this.SHOT_KEYNAMES) {
+            var shotprops = this.shotprops[keyname];
+            if(this.keys[keyname].wasDown && shotprops.cooldown === 0) {
+                this.fire(keyname);
+            }
         }
     }
     thrust(speed, rot) {
@@ -594,23 +630,43 @@ class Entity extends Sprite {
         effect.vel.copy(this.vel).addSpeed(speed, rot);
         effect.rot = rot;
     }
-    fireX() {
-        var cls = this.shotXClass;
+    fire(keyname) {
+        var shotprops = this.shotprops[keyname];
+        var cls = this.shotClass[keyname];
         if(!cls) return;
-        var shot = this.shoot(cls);
-        this.cooldownX += shot.cooldown;
+
+        var serial_i = shotprops.n_shots % cls.serialShots;
+        for(var i = 0; i < cls.initialShots; i++) {
+            var shot = this.shoot(cls, i, serial_i);
+        }
+
+        shotprops.cooldown += cls.cooldown;
+        shotprops.n_shots++;
     }
-    fireY() {
-        var cls = this.shotYClass;
-        if(!cls) return;
-        var shot = this.shoot(cls);
-        this.cooldownY += shot.cooldown;
-    }
-    shoot(cls) {
+    shoot(cls, shot_i, serial_shot_i) {
+        // shot_i: index of this shot. E.g. if 3 are being fired at once,
+        // this one might be 0, 1, or 2.
+
         var shot = this.field.addShot(cls);
         shot.ship = this;
-        shot.pos.copy(this.pos).addSpeed(cls.initialSpeed, this.rot);
-        shot.vel.copy(this.vel).addSpeed(cls.initialSpeed, this.rot);
+
+        var rot = this.rot;
+        if(cls.initialShots > 1) {
+            // rotVariance: number between -.5 and .5
+            var rotVariance = shot_i / (cls.initialShots - 1) - .5;
+            rot += rotVariance * cls.initialRotVariance;
+        }
+        if(cls.serialShots > 1) {
+            // rotVariance: number between -.5 and .5
+            var rotVariance = serial_shot_i / (cls.serialShots - 1) - .5;
+            rot += rotVariance * cls.serialRotVariance;
+        }
+
+        shot.pos.copy(this.pos)
+            .addSpeed(cls.initialSpeed, rot);
+        shot.vel.copy(this.vel)
+            .mul(cls.initialVelMul)
+            .addSpeed(cls.initialSpeed, rot);
         return shot;
     }
     colliding(other) {
@@ -668,6 +724,7 @@ class Entity extends Sprite {
         var y1 = y0 + p.y;
         var ctx = canvas.getContext('2d');
         ctx.strokeStyle = this.circleStrokeStyle;
+        ctx.lineWidth = this.circleLineWidth;
         ctx.beginPath();
         ctx.moveTo(x0, y0);
         ctx.lineTo(x1, y1);
@@ -812,21 +869,37 @@ class Ship extends Entity {
 }
 
 class FighterShip extends Ship {
+    radius = 6 * RADIUSMUL;
     picture = new Picture([
-        new Point( 1,    0),
-        new Point(-1, -.75),
-        new Point(-1,  .75),
+        new Shape([
+            new Point(-1.2,  .95),
+            new Point( 1  ,    0),
+            new Point(-1.2, -.95),
+        ], {stroke: false}),
+        new Shape([
+            new Point(-1.2,  .95),
+            new Point( 1  ,    0),
+            new Point(-1.2, -.95),
+        ], {fill: false, close: false}),
     ], {radiusmul: 1.2});
 }
 
 class Shot extends Entity {
 
-    static initialSpeed = 14;
+    static initialSpeed = 20;
+    static initialVelMul = 1;
+    static initialShots = 1;
+    static serialShots = 2;
+    // "rot variance": difference in radians between the rot of first
+    // and last Shot instance produced by firing this Shot type
+    static initialRotVariance = 0;
+    static serialRotVariance = Math.PI / 18;
+    static cooldown = 4;
+
     maxAge = 40;
     velmul = .95;
     radius = .25 * RADIUSMUL;
     shouldRenderTrail = true;
-    cooldown = 4;
 
     // How hard we move things we hit
     hitVelMul = .1;
@@ -862,7 +935,7 @@ class Rock extends Entity {
                 .rotate(point_rot);
             points.push(point);
         }
-        this.picture = new Picture(points);
+        this.picture = new Picture([new Shape(points)]);
 
         this.pos.setRandomWithin(field.size);
         this.radius = Random.randNumber(7, 25) * RADIUSMUL;
