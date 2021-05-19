@@ -107,9 +107,16 @@ class Point {
         this.y = y || 0;
         return this;
     }
-    dist(other) {
+    dist(other, modulo) {
         var dx = Math.abs(this.x - other.x);
         var dy = Math.abs(this.y - other.y);
+        if(modulo) {
+            // If modulo is provided, it should be a Point representing
+            // a rectangle representing a torus within which this and other
+            // are contained.
+            if(dx > modulo.x / 2) dx = modulo.x - dx;
+            if(dy > modulo.y / 2) dy = modulo.y - dy;
+        }
         return Math.sqrt(dx * dx + dy * dy);
     }
     copy(other) {
@@ -670,7 +677,8 @@ class Entity extends Sprite {
         return shot;
     }
     colliding(other) {
-        return this.pos.dist(other.pos) < this.radius + other.radius;
+        var d = this.pos.dist(other.pos, this.field.size);
+        return d < this.radius + other.radius;
     }
     handleCollision(other) {
         /* We collided with another Entity!
@@ -691,15 +699,26 @@ class Entity extends Sprite {
         var r1 = 1 - r0;
 
         /* Distance between this and other */
-        var dist = this.pos.dist(other.pos);
+        var dist = this.pos.dist(other.pos, this.field.size);
 
         /* Target distance: this and other are just barely touching */
         var tdist = this.radius + other.radius;
 
+        /* dx, dy: shortest vector from this to other, on the torus
+        represented by this.field.size */
+        var dx = other.pos.x - this.pos.x;
+        var dy = other.pos.y - this.pos.y;
+        var fieldx = this.field.size.x;
+        var fieldy = this.field.size.y;
+        if(dx < -fieldx / 2) dx += fieldx;
+        if(dx >  fieldx / 2) dx -= fieldx;
+        if(dy < -fieldy / 2) dy += fieldy;
+        if(dy >  fieldy / 2) dy -= fieldy;
+
         /* mx, my: vector which would move this away from other, to where
         they are just barely touching */
-        var mx = (other.pos.x - this.pos.x) / dist * (dist - tdist);
-        var my = (other.pos.y - this.pos.y) / dist * (dist - tdist);
+        var mx = dx / dist * (dist - tdist);
+        var my = dy / dist * (dist - tdist);
 
         var posmul = .25;
         this.pos.x  += mx * r1 * posmul;
