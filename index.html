@@ -25,10 +25,21 @@ body {
 'use strict';
 
 
+// debug stuff
 var TIMING = false;
+var RENDER_CIRCLES = false;
+
+// physics tweaking stuff
 var VELMUL = .7;
 var ROTVELMUL = .7;
 var RADIUSMUL = 2;
+
+// keyCode values
+var KEY_U = 38;
+var KEY_D = 40;
+var KEY_L = 37;
+var KEY_R = 39;
+var KEY_SPACE = 32;
 
 
 function linear(x0, x1, n) {
@@ -211,18 +222,20 @@ class Field {
     DEFAULT_WIDTH = 1000;
     DEFAULT_HEIGHT = 1000;
 
-    constructor(size) {
+    constructor(game, size) {
         size = size? size.copy(): new Point(
             this.DEFAULT_WIDTH,
             this.DEFAULT_HEIGHT,
         );
+
+        this.game = game;
+        this.size = size;
 
         this.stars = [];
         this.ships = [];
         this.shots = [];
         this.effects = [];
         this.rocks = [];
-        this.size = size;
 
         /* Create a canvas for rendering this Field.
         This canvas is never attached to a parent element, we only
@@ -266,6 +279,12 @@ class Field {
         for(var i = 0; i < n_rocks; i++) {
             var rock = this.addRock();
         }
+    }
+    cleanup() {
+        for(var entity of this.ships) entity.cleanup();
+        for(var entity of this.shots) entity.cleanup();
+        for(var entity of this.effects) entity.cleanup();
+        for(var entity of this.rocks) entity.cleanup();
     }
     addShip(cls) {
         cls = cls || Ship;
@@ -334,11 +353,10 @@ class Field {
         for(var i = 0; i < entities.length; i++) {
             var entity = entities[i];
             if(entity.pleaseRemove) {
+                entity.cleanup();
                 entities.splice(i, 1);
                 i--;
             }
-            /* TODO: figure out what to do about other possible references
-            to entity, e.g. camera.target */
         }
     }
     innerRender(camera) {
@@ -483,8 +501,10 @@ class Sprite extends Particle {
             for(var addy = addy0; addy <= addy0 + fieldy; addy += fieldy) {
                 if(this.shouldRenderTrail) this.renderTrail(
                     canvas, camera, addx, addy);
-                if(this.shouldRenderCircle) this.renderCircle(
-                    canvas, camera, addx, addy);
+                if(this.shouldRenderCircle || RENDER_CIRCLES) {
+                    this.renderCircle(
+                        canvas, camera, addx, addy);
+                }
                 if(this.picture) this.picture.render(
                     this, canvas, camera, addx, addy);
             }
@@ -599,6 +619,19 @@ class Entity extends Sprite {
 
         this.age = 0;
         this.pleaseRemove = false;
+    }
+    cleanup() {
+        var game = this.field.game;
+
+        for(var player of game.players) {
+            if(player.entity !== this) continue;
+            player.unsetEntity();
+        }
+
+        var camera = game.camera;
+        if(camera.target === this) {
+            camera.unsetTarget();
+        }
     }
     step() {
         this.vel.mul(this.velmul);
@@ -794,9 +827,13 @@ class Camera extends Particle {
     constructor(field) {
         super(field);
         this.target = null;
+        this.pos.setMidpoint(field.size);
     }
     setTarget(target) {
         this.target = target;
+    }
+    unsetTarget() {
+        this.target = null;
     }
     step() {
         this.vel.mul(this.velmul);
@@ -817,11 +854,18 @@ class Camera extends Particle {
 }
 
 class Player {
-    constructor(entity) {
-        this.entity = entity;
+    constructor() {
+        this.entity = null;
         this.keys = Key.createKeys();
     }
+    setEntity(entity) {
+        this.entity = entity;
+    }
+    unsetEntity() {
+        this.entity = null;
+    }
     step() {
+        if(!this.entity) return;
         for(var keyname of Key.KEYNAMES) {
             var key = this.keys[keyname];
             this.entity.keys[keyname].copy(key);
@@ -832,18 +876,29 @@ class Player {
 
 class Game {
     constructor(canvas, fieldSize) {
-        this.canvas = canvas;
-        this.field = new Field(fieldSize);
-        this.camera = new Camera(this.field);
-        this.players = [];
-        this.intervalId = 0;
-
         canvas.addEventListener('keydown', this.onKeyDown.bind(this));
         canvas.addEventListener('keyup', this.onKeyUp.bind(this));
+
+        this.canvas = canvas;
+        this.intervalId = 0;
+        this.players = [];
 
         /* Hashmap from keyCode values to Key instances belonging to
         Player instances in this.players */
         this.keysByCode = {};
+
+        this._newGame(fieldSize);
+    }
+    _newGame(fieldSize) {
+        this.field = new Field(this, fieldSize);
+        this.camera = new Camera(this.field);
+    }
+    newGame(fieldSize) {
+        this.cleanup();
+        this._newGame(fieldSize);
+    }
+    cleanup() {
+        this.field.cleanup();
     }
     onKeyDown(event) {
         this.keyDown(event.keyCode);
@@ -867,8 +922,8 @@ class Game {
     addShip(cls) {
         return this.field.addShip(cls);
     }
-    addPlayer(entity) {
-        var player = new Player(entity);
+    addPlayer() {
+        var player = new Player();
         this.players.push(player);
         return player;
     }
@@ -935,9 +990,11 @@ class SparkEffect extends Entity {
 }
 
 class Ship extends Entity {
+    static shipName = 'Ship';
 }
 
 class FighterShip extends Ship {
+    static shipName = 'Fighter';
     radius = 6 * RADIUSMUL;
     picture = new Picture([
         new Shape([
@@ -1028,23 +1085,20 @@ class Rock extends Entity {
 
 
 var canvas = document.getElementById('canvas');
+
 var game = new Game(canvas);
 
-var KEY_U = 38;
-var KEY_D = 40;
-var KEY_L = 37;
-var KEY_R = 39;
-var KEY_SPACE = 32;
-
-var ship = game.addShip(FighterShip);
-ship.pos.setMidpoint(game.field.size);
-game.camera.setTarget(ship);
-var player = game.addPlayer(ship);
+var player = game.addPlayer();
 game.mapKey(player.keys.u, KEY_U);
 game.mapKey(player.keys.d, KEY_D);
 game.mapKey(player.keys.l, KEY_L);
 game.mapKey(player.keys.r, KEY_R);
 game.mapKey(player.keys.x, KEY_SPACE);
+
+var ship = game.addShip(FighterShip);
+ship.pos.setMidpoint(game.field.size);
+game.camera.setTarget(ship);
+player.setEntity(ship);
 
 game.play();
 canvas.style.border = 'none';
