@@ -499,6 +499,7 @@ class Sprite extends Particle {
     radius = 10 * RADIUSMUL;
 
     shouldRenderCircle = false;
+    shouldRenderCircleLine = true;
     circleStrokeStyle = 'rgb(0,200,0)';
     circleFillStyle   = 'rgba(255,255,255,.15)';
     circleLineWidth = 2;
@@ -716,6 +717,16 @@ class Entity extends Sprite {
         effect.vel.copy(this.vel).addSpeed(speed, rot);
         effect.rot = rot;
     }
+    emitEffects(cls, n_effects, speed_min, speed_max, velmul) {
+        for(var i = 0; i < n_effects; i++) {
+            var effect = this.field.addEffect(cls);
+            effect.rot = this.rot;
+            effect.pos.copy(this.pos);
+            var speed = Random.randNumber(speed_min, speed_max);
+            effect.vel.copy(this.vel).mul(velmul)
+                .addSpeed(speed, Random.randRotation());
+        }
+    }
     fire(keyname) {
         var shotprops = this.shotprops[keyname];
         var cls = this.shotClass[keyname];
@@ -822,7 +833,11 @@ class Entity extends Sprite {
     }
     renderCircle(canvas, camera, addx, addy) {
         super.renderCircle(canvas, camera, addx, addy);
-
+        if(this.shouldRenderCircleLine) {
+            this.renderCircleLine(canvas, camera, addx, addy);
+        }
+    }
+    renderCircleLine(canvas, camera, addx, addy) {
         /* Render a little line indicating this.rot */
         var x0 = this.pos.x + addx;
         var y0 = this.pos.y + addy;
@@ -1145,9 +1160,21 @@ class TitleMenu extends Menu {
 }
 
 class Effect extends Entity {
+    fadeWithAge = true;
+}
+
+class SmokeEffect extends Effect {
+    radius = 7 * RADIUSMUL;
+    shouldRenderCircle = true;
+    shouldRenderCircleLine = false;
+    circleStrokeStyle = 'rgba(240,240,240,.15)';
+    circleFillStyle = 'rgba(200,200,200,.15)';
+    velmul = 1;
+    maxAge = 20;
 }
 
 class ThrustEffect extends Effect {
+    radius = 5 * RADIUSMUL;
     shouldRenderTrail = true;
     trailStart = .7;
     trailStrokeStyle = 'rgba(0,255,255,.5)';
@@ -1155,7 +1182,8 @@ class ThrustEffect extends Effect {
     maxAge = 20;
 }
 
-class SparkEffect extends Entity {
+class SparkEffect extends Effect {
+    radius = 3 * RADIUSMUL;
     shouldRenderTrail = true;
     trailStart = .7;
     trailStrokeStyle = 'rgba(255,255,0,.5)';
@@ -1171,7 +1199,7 @@ class FighterShip extends Ship {
 
     shotClass = {
         x: Shot,
-        y: null,
+        y: MissileShot,
     };
 
     picture = new Picture([
@@ -1242,15 +1270,7 @@ class Shot extends Entity {
     }
     hit(other) {
         other.vel.addMul(this.vel, this.hitVelMul);
-
-        for(var i = 0; i < 2; i++) {
-            var spark = this.field.addEffect(SparkEffect);
-            spark.pos.copy(this.pos);
-            var speed = Random.randNumber(2, 4);
-            spark.vel.copy(this.vel).mul(.75)
-                .addSpeed(speed, Random.randRotation());
-        }
-
+        this.emitEffects(SparkEffect, 2, 2, 4, .75);
         this.remove();
     }
 }
@@ -1298,6 +1318,42 @@ class BlasterShot extends Shot {
             shot.vel.copy(this.vel).mul(velmul)
                 .addSpeed(speed, shot.rot);
         }
+    }
+}
+
+class MissileShot extends Shot {
+    radius = 6 * RADIUSMUL;
+    static initialSpeed = 8;
+    static initialVelMul = .2;
+    velmul = 1.1;
+
+    hitVelMul = .45;
+
+    maxAge = 30;
+    fadeWithAge = false;
+    static cooldown = 24;
+
+    shouldRenderTrail = true;
+
+    picture = new Picture([
+        new Shape([
+            new Point(-1.2, -.3),
+            new Point( 1.2, -.3),
+            new Point( 1.2,  .3),
+            new Point(-1.2,  .3),
+        ]),
+    ]);
+
+    step() {
+        if(this.age >= this.maxAge / 2) {
+            this.velmul = .9;
+            this.shouldRenderTrail = false;
+        }
+        super.step();
+    }
+    remove() {
+        this.emitEffects(SmokeEffect, 3, 3, 6, .65);
+        super.remove();
     }
 }
 
