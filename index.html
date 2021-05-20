@@ -33,6 +33,7 @@ var RENDER_CIRCLES = false;
 var VELMUL = .7;
 var ROTVELMUL = .7;
 var RADIUSMUL = 2;
+var DAMAGEMUL = 1.5;
 
 // keyCode values
 var KEY_U = 38;
@@ -241,10 +242,12 @@ class Field {
         this.size = size;
 
         this.stars = [];
-        this.ships = [];
-        this.shots = [];
-        this.effects = [];
-        this.rocks = [];
+
+        this.entityArrays = [];
+        this.ships = this.addEntityArray();
+        this.shots = this.addEntityArray();
+        this.effects = this.addEntityArray();
+        this.rocks = this.addEntityArray();
 
         /* Create a canvas for rendering this Field.
         This canvas is never attached to a parent element, we only
@@ -286,45 +289,60 @@ class Field {
 
         var n_rocks = size.x * size.y / 100000;
         for(var i = 0; i < n_rocks; i++) {
-            var rock = this.addRock();
+            var rock = this.addRock(Rock);
         }
     }
+    addEntityArray() {
+        // Create an Array used to store Entity instances
+        // (E.g. Game.ships, Game.rocks, etc)
+        var entityArray = [];
+
+        // Add a pending Array of things to be added to the Array at the
+        // start of next Field.step
+        entityArray.pending = [];
+
+        this.entityArrays.push(entityArray);
+        return entityArray;
+    }
     cleanup() {
-        for(var entity of this.ships) entity.cleanup();
-        for(var entity of this.shots) entity.cleanup();
-        for(var entity of this.effects) entity.cleanup();
-        for(var entity of this.rocks) entity.cleanup();
+        for(var entityArray of this.entityArrays) {
+            for(var entity of entityArray) entity.cleanup();
+        }
     }
     addShip(cls) {
-        cls = cls || Ship;
         var entity = new cls(this);
-        this.ships.push(entity);
+        this.ships.pending.push(entity);
         return entity;
     }
     addShot(cls) {
-        cls = cls || Shot;
         var entity = new cls(this);
-        this.shots.push(entity);
+        this.shots.pending.push(entity);
         return entity;
     }
     addEffect(cls) {
-        cls = cls || Effect;
         var entity = new cls(this);
-        this.effects.push(entity);
+        this.effects.pending.push(entity);
         return entity;
     }
-    addRock(cls) {
-        cls = cls || Rock;
-        var entity = new cls(this);
-        this.rocks.push(entity);
+    addRock(cls, radius) {
+        radius = radius || Random.randNumber(7, 25) * RADIUSMUL;
+        var entity = new cls(this, radius);
+        this.rocks.pending.push(entity);
         return entity;
+    }
+    addPendingEntities(entityArray) {
+        for(var entity of entityArray.pending) entityArray.push(entity);
+        entityArray.pending.length = 0;
     }
     step() {
+        for(var entityArray of this.entityArrays) {
+            this.addPendingEntities(entityArray);
+        }
+
         for(var star of this.stars) star.step();
-        for(var entity of this.ships) entity.step();
-        for(var entity of this.shots) entity.step();
-        for(var entity of this.effects) entity.step();
-        for(var entity of this.rocks) entity.step();
+        for(var entityArray of this.entityArrays) {
+            for(var entity of entityArray) entity.step();
+        }
 
         for(var shot of this.shots) {
             for(var ship of this.ships) {
@@ -350,17 +368,16 @@ class Field {
             }
         }
 
-        this.removeEntities(this.ships);
-        this.removeEntities(this.shots);
-        this.removeEntities(this.effects);
-        this.removeEntities(this.rocks);
+        for(var entityArray of this.entityArrays) {
+            this.removeEntities(entityArray);
+        }
     }
-    removeEntities(entities) {
-        for(var i = 0; i < entities.length; i++) {
-            var entity = entities[i];
+    removeEntities(entityArray) {
+        for(var i = 0; i < entityArray.length; i++) {
+            var entity = entityArray[i];
             if(entity._shouldRemove) {
                 entity.cleanup();
-                entities.splice(i, 1);
+                entityArray.splice(i, 1);
                 i--;
             }
         }
@@ -383,10 +400,9 @@ class Field {
         ctx.stroke();
 
         for(var star of this.stars) star.render(canvas, camera);
-        for(var entity of this.ships) entity.render(canvas, camera);
-        for(var entity of this.shots) entity.render(canvas, camera);
-        for(var entity of this.effects) entity.render(canvas, camera);
-        for(var entity of this.rocks) entity.render(canvas, camera);
+        for(var entityArray of this.entityArrays) {
+            for(var entity of entityArray) entity.render(canvas, camera);
+        }
     }
     render(canvas, camera) {
         this.innerRender(camera);
@@ -624,6 +640,8 @@ class Entity extends Sprite {
     thrustEffectEvery = 3;
     thrustEffectCooldown = 0;
 
+    hp = -1;
+
     constructor(field) {
         super(field);
 
@@ -642,6 +660,16 @@ class Entity extends Sprite {
 
         this.age = 0;
         this._shouldRemove = false;
+    }
+    damage(hp) {
+        if(this.hp < 0) return;
+        if((this.hp -= hp) < 0) this.hp = 0;
+        if(!this.hp) {
+            this.die();
+        }
+    }
+    die() {
+        this.remove();
     }
     remove() {
         this._shouldRemove = true;
@@ -679,7 +707,7 @@ class Entity extends Sprite {
 
         this.age++;
         if(this.maxAge >= 0 && this.age >= this.maxAge) {
-            this.remove();
+            this.die();
         }
     }
     handleKeys() {
@@ -1110,6 +1138,12 @@ class TitleMenu extends Menu {
 
     setPlayer(player) {
         this.player = player;
+
+        var ship = player.entity;
+        if(ship) {
+            this.ship_class_i = SHIP_CLASSES.indexOf(ship.constructor);
+        }
+
         this.updateShipClass();
     }
     render() {
@@ -1192,13 +1226,19 @@ class SparkEffect extends Effect {
 }
 
 class Ship extends Entity {
+    hp = 100;
+
+    die() {
+        this.emitEffects(SmokeEffect, 4, 3, 6, .65);
+        super.die();
+    }
 }
 
 class FighterShip extends Ship {
     radius = 6 * RADIUSMUL;
 
     shotClass = {
-        x: Shot,
+        x: SingleShot,
         y: MissileShot,
     };
 
@@ -1224,6 +1264,8 @@ class AssaultShip extends Ship {
     rotspeed = Math.PI / 30;
     rotmul = .65;
 
+    hp = 175;
+
     shotClass = {
         x: TripleShot,
         y: BlasterShot,
@@ -1248,19 +1290,19 @@ class Shot extends Entity {
     static initialRotVariance = 0;
     static serialRotVariance = 0;
 
-    radius = .25 * RADIUSMUL;
     static initialSpeed = 20;
     static initialVelMul = 1;
-    velmul = .95;
 
     // How hard we move things we hit
     hitVelMul = .1;
 
-    maxAge = 40;
-    fadeWithAge = true;
-    static cooldown = 4;
+    // How much damage we do
+    hitDamage = 10 * DAMAGEMUL;
 
-    shouldRenderTrail = true;
+    // If < 1, the amount of damage we do goes down over time
+    hitDamageAgeMul = 1;
+
+    static cooldown = 4;
 
     constructor(field) {
         super(field);
@@ -1268,19 +1310,33 @@ class Shot extends Entity {
         // The Ship who shot us out
         this.ship = null;
     }
+    step() {
+        super.step();
+        this.hitDamage *= this.hitDamageAgeMul;
+    }
     hit(other) {
         other.vel.addMul(this.vel, this.hitVelMul);
+        other.damage(this.hitDamage);
         this.emitEffects(SparkEffect, 2, 2, 4, .75);
-        this.remove();
+        this.die();
     }
 }
 
-class DoubleShot extends Shot {
+class SingleShot extends Shot {
+    radius = .25 * RADIUSMUL;
+    velmul = .95;
+    hitDamageAgeMul = .95;
+    shouldRenderTrail = true;
+    maxAge = 40;
+    fadeWithAge = true;
+}
+
+class DoubleShot extends SingleShot {
     static serialShots = 2;
     static serialRotVariance = Math.PI / 18;
 }
 
-class TripleShot extends Shot {
+class TripleShot extends SingleShot {
     static initialShots = 3;
     static serialShots = 1;
     static initialRotVariance = Math.PI / 13;
@@ -1294,30 +1350,30 @@ class BlasterShot extends Shot {
     velmul = 1;
 
     hitVelMul = .5;
+    hitDamage = 20 * DAMAGEMUL;
 
     maxAge = 14;
-    fadeWithAge = false;
     static cooldown = 32;
 
-    shouldRenderTrail = false;
     picture = Picture.newPolygon(6);
 
-    remove() {
-        super.remove();
-
-        var cls = Shot;
+    die() {
+        var cls = SingleShot;
         var n_shots = 5;
         var rot_variance = Math.PI / 4;
         var speed = 10;
         var velmul = .8;
         for(var i = 0; i < n_shots; i++) {
             var shot = this.field.addShot(cls);
+            shot.ship = this.ship;
             shot.pos.copy(this.pos);
             shot.rot = this.rot
                 + getRotVariance(i, n_shots) * rot_variance;
             shot.vel.copy(this.vel).mul(velmul)
                 .addSpeed(speed, shot.rot);
         }
+
+        super.die();
     }
 }
 
@@ -1328,6 +1384,7 @@ class MissileShot extends Shot {
     velmul = 1.1;
 
     hitVelMul = .45;
+    hitDamage = 10 * DAMAGEMUL;
 
     maxAge = 30;
     fadeWithAge = false;
@@ -1351,9 +1408,9 @@ class MissileShot extends Shot {
         }
         super.step();
     }
-    remove() {
+    die() {
         this.emitEffects(SmokeEffect, 3, 3, 6, .65);
-        super.remove();
+        super.die();
     }
 }
 
@@ -1363,21 +1420,46 @@ class Rock extends Entity {
     velmul = 1;
     rotmul = 1;
 
-    constructor(field) {
+    constructor(field, radius) {
         super(field);
+
+        var default_hp = 50;
+        var default_radius = 10 * RADIUSMUL;
+
+        radius = radius || default_radius;
+        this.radius = radius;
+
+        this.hp = default_hp * radius / default_radius;
 
         var n_points = Random.randIntInclusive(5, 10);
         this.picture = Picture.newPolygon(n_points,
             {rotVariance: .5, radiusVariance: .1});
 
         this.pos.setRandomWithin(field.size);
-        this.radius = Random.randNumber(7, 25) * RADIUSMUL;
 
         var speed = Random.randNumber(3.5);
         this.vel.setSpeed(speed, Random.randRotation());
 
         var MAX_ROT_VEL = Math.PI / 20;
         this.rot_vel = Random.randNumber(-MAX_ROT_VEL, MAX_ROT_VEL);
+    }
+    die() {
+        var min_radius = 9 * RADIUSMUL;
+        if(this.radius >= min_radius) {
+            var velmul = .75;
+            var n_rocks = 2;
+            var addposrot = Random.randRotation();
+            for(var i = 0; i < n_rocks; i++) {
+                var rock = this.field.addRock(
+                    this.constructor, this.radius * .65);
+                var posrot = (i / n_rocks) * Math.PI * 2 + addposrot;
+                rock.pos.copy(this.pos)
+                    .addSpeed(this.radius, addposrot);
+                rock.vel.addMul(this.vel, velmul);
+            }
+        }
+        this.emitEffects(SmokeEffect, 3, 3, 6, .65);
+        super.die();
     }
 }
 
