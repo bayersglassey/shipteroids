@@ -906,6 +906,7 @@ class Game {
         this.intervalId = 0;
         this.players = [];
         this.menu = null;
+        this.shouldRenderControls = true;
 
         /* Hashmap from keyCode values to Key instances belonging to
         Player instances in this.players */
@@ -940,6 +941,8 @@ class Game {
             this.menu.keyDown(keyCode);
         } else if(keyCode === KEY_ESCAPE) {
             this.setTitleMenu();
+        } else if(keyCode === KEY_ENTER) {
+            this.shouldRenderControls = !this.shouldRenderControls;
         } else {
             var key = this.keysByCode[keyCode];
             if(key) key.down();
@@ -988,7 +991,38 @@ class Game {
         var ctx = canvas.getContext('2d');
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         this.field.render(canvas, this.camera);
-        if(this.menu) this.menu.render();
+        if(this.menu) {
+            this.menu.render();
+        } else if(this.shouldRenderControls) {
+            this.renderControls();
+        }
+    }
+    renderControls() {
+        var canvas = this.canvas;
+        var ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#fff';
+        ctx.textAlign = 'left';
+
+        var x = 16;
+        var y = 20;
+
+        ctx.font = 'normal bold 24px sans-serif';
+        ctx.fillText('Controls:', x, y);
+        y += 26;
+
+        ctx.font = 'normal 18px sans-serif';
+        var lines = [
+            'Left/right arrow keys: turn left/right',
+            'Up/down arrow keys: thrust/reverse',
+            'Spacebar: primary space gun',
+            'Z: secondary space gun',
+            'Escape: return to menu',
+            'Enter: toggle display controls',
+        ];
+        for(var line of lines) {
+            ctx.fillText(line, x, y);
+            y += 18;
+        }
     }
     renderTitle(title, subtitles) {
         var canvas = this.canvas;
@@ -1066,7 +1100,7 @@ class TitleMenu extends Menu {
     render() {
         this.game.renderTitle('Shipteroids', [
             'Choose your ship',
-            '(Arrow keys + Enter)',
+            '(Left/right arrow keys + Enter)',
         ]);
     }
     keyDown(keyCode) {
@@ -1301,6 +1335,8 @@ var SHIP_CLASSES = [
 var canvas = document.getElementById('canvas');
 
 var game = new Game(canvas);
+var params = new URLSearchParams(window.location.search);
+game.shouldRenderControls = !Boolean(params.get('nocontrols'));
 
 var player = game.addPlayer();
 game.mapKey(player.keys.u, KEY_U);
