@@ -28,6 +28,7 @@ body {
 // debug stuff
 var TIMING = false;
 var RENDER_CIRCLES = false;
+var RENDER_BOUNDARY = false;
 
 // physics tweaking stuff
 var VELMUL = .7;
@@ -78,7 +79,8 @@ function getRotVariance(i, n) {
 
 function moduloDiff(x0, x1, w) {
     /* Difference between two numbers on the "wrapped" interval between
-    0 and w. */
+    0 and w.
+    (Distance from x0 to x1.) */
     x0 = modulo(x0, w);
     x1 = modulo(x1, w);
     var diff = x1 - x0;
@@ -238,7 +240,7 @@ class Field {
     DEFAULT_HEIGHT = 1000;
 
     constructor(game, size) {
-        size = size? size.copy(): new Point(
+        size = size? size.clone(): new Point(
             this.DEFAULT_WIDTH,
             this.DEFAULT_HEIGHT,
         );
@@ -392,7 +394,16 @@ class Field {
         var ctx = canvas.getContext('2d');
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+        if(RENDER_BOUNDARY) this.renderBoundary(canvas);
+
+        for(var star of this.stars) star.render(canvas, camera);
+        for(var entityArray of this.entityArrays) {
+            for(var entity of entityArray) entity.render(canvas, camera);
+        }
+    }
+    renderBoundary(canvas) {
         /* Draw a box around the field */
+        var ctx = canvas.getContext('2d');
         var w = this.size.x;
         var h = this.size.y;
         ctx.strokeStyle = '#800';
@@ -403,11 +414,6 @@ class Field {
         ctx.lineTo(0, h);
         ctx.closePath();
         ctx.stroke();
-
-        for(var star of this.stars) star.render(canvas, camera);
-        for(var entityArray of this.entityArrays) {
-            for(var entity of entityArray) entity.render(canvas, camera);
-        }
     }
     render(canvas, camera) {
         this.innerRender(camera);
@@ -661,12 +667,12 @@ class Entity extends Sprite {
     thrustEffectEvery = 3;
     thrustEffectCooldown = 0;
 
-    maxhp = -1;
+    static maxhp = -1;
 
     constructor(field) {
         super(field);
 
-        this.hp = this.maxhp;
+        this.hp = this.constructor.maxhp;
 
         this.rot = 0;
         this.rot_vel = 0;
@@ -803,6 +809,7 @@ class Entity extends Sprite {
                 + Random.randNumber(-.5, .5) * rand_rot_variance;
             shot.vel.copy(this.vel).mul(velmul)
                 .addSpeed(speed, shot.rot);
+            shot.afterShotBy(this);
             shots.push(shot);
         }
         return shots;
@@ -815,6 +822,7 @@ class Entity extends Sprite {
         var serial_i = shotprops.n_shots % cls.serialShots;
         for(var i = 0; i < cls.initialShots; i++) {
             var shot = this.shoot(cls, i, serial_i);
+            shot.afterShotBy(this);
         }
 
         shotprops.cooldown += cls.cooldown;
@@ -848,8 +856,7 @@ class Entity extends Sprite {
                 * cls.randomSpeedVariance;
 
         shot.pos.copy(this.pos)
-            .addSpeed(this.radius, shot.rot + posrot)
-            .addSpeed(speed, shot.rot);
+            .addSpeed(this.radius, shot.rot + posrot);
         shot.vel.copy(this.vel)
             .mul(cls.initialVelMul)
             .addSpeed(speed, shot.rot);
@@ -1008,7 +1015,7 @@ class Player {
 }
 
 class Game {
-    constructor(canvas, fieldSize) {
+    constructor(canvas, fieldSize, n_ships) {
         canvas.addEventListener('keydown', this.onKeyDown.bind(this));
         canvas.addEventListener('keyup', this.onKeyUp.bind(this));
 
@@ -1022,15 +1029,28 @@ class Game {
         Player instances in this.players */
         this.keysByCode = {};
 
-        this._newGame(fieldSize);
+        this._newGame(fieldSize, n_ships);
     }
-    _newGame(fieldSize) {
+    _newGame(fieldSize, n_ships) {
+        n_ships = n_ships || 0;
+
         this.field = new Field(this, fieldSize);
         this.camera = new Camera(this.field);
+        this.n_ships = n_ships;
+
+        for(var i = 0; i < n_ships; i++) {
+            var cls = Random.choice(SHIP_CLASSES);
+            var ship = this.addShip(cls);
+            ship.pos.setRandomWithin(this.field.size);
+            ship.rot = Random.randRotation();
+        }
     }
-    newGame(fieldSize) {
+    newGame(fieldSize, n_ships) {
         this.cleanup();
-        this._newGame(fieldSize);
+        this._newGame(fieldSize, n_ships);
+    }
+    reset() {
+        this.newGame(this.field.size, this.n_ships);
     }
     cleanup() {
         this.field.cleanup();
@@ -1203,6 +1223,27 @@ class TitleMenu extends Menu {
     player = null;
     ship_class_i = 0;
 
+    static ACTIONS = [
+        {
+            name: 'choose ship',
+            subtitles: [
+                'Choose your ship',
+                '(Left/right arrow keys + Enter)',
+            ],
+        },
+        {
+            name: 'reset',
+            subtitles: [
+                'Reset game?',
+                '(Press Enter)',
+            ],
+        },
+    ];
+
+    constructor(game) {
+        super(game);
+        this.action_i = 0;
+    }
     setPlayer(player) {
         this.player = player;
 
@@ -1214,32 +1255,41 @@ class TitleMenu extends Menu {
         this.updateShipClass();
     }
     render() {
-        this.game.renderTitle('Shipteroids', [
-            'Choose your ship',
-            '(Left/right arrow keys + Enter)',
-        ]);
+        var action = this.constructor.ACTIONS[this.action_i];
+        this.game.renderTitle('Shipteroids', action.subtitles);
     }
     keyDown(keyCode) {
         if(!this.player) return;
-        switch(keyCode) {
-            case KEY_L: {
-                this.ship_class_i = modulo(
-                    this.ship_class_i - 1, SHIP_CLASSES.length);
+        var action = this.constructor.ACTIONS[this.action_i];
+        if(keyCode === KEY_U) {
+            this.action_i = modulo(this.action_i - 1,
+                this.constructor.ACTIONS.length);
+        } else if(keyCode === KEY_D) {
+            this.action_i = modulo(this.action_i + 1,
+                this.constructor.ACTIONS.length);
+        } else if(keyCode === KEY_L) {
+            if(action.name === 'choose ship') {
+                this.ship_class_i = modulo(this.ship_class_i - 1,
+                    SHIP_CLASSES.length);
                 this.updateShipClass();
-                break;
             }
-            case KEY_R: {
-                this.ship_class_i = modulo(
-                    this.ship_class_i + 1, SHIP_CLASSES.length);
+        } else if(keyCode === KEY_R) {
+            if(action.name === 'choose ship') {
+                this.ship_class_i = modulo(this.ship_class_i + 1,
+                    SHIP_CLASSES.length);
                 this.updateShipClass();
-                break;
             }
-            case KEY_ENTER: {
+        } else if(keyCode === KEY_ENTER) {
+            if(action.name === 'reset') {
+                this.resetGame();
+            } else {
                 this.game.unsetMenu();
-                break;
             }
-            default: break;
         }
+    }
+    resetGame() {
+        this.game.reset();
+        this.updateShipClass();
     }
     updateShipClass() {
         var cls = SHIP_CLASSES[this.ship_class_i];
@@ -1298,7 +1348,7 @@ class SparkEffect extends Effect {
 }
 
 class Ship extends Entity {
-    maxhp = 100;
+    static maxhp = 100;
 
     die() {
         this.emitEffects(SmokeEffect, 4, {
@@ -1311,7 +1361,7 @@ class Ship extends Entity {
 }
 
 class FighterShip extends Ship {
-    radius = 6 * RADIUSMUL;
+    radius = 7 * RADIUSMUL;
     thrustSpeed = 2;
     reverseSpeed = 1.25;
     velmul = .95;
@@ -1319,28 +1369,28 @@ class FighterShip extends Ship {
     rotmul = .5;
 
     shotClass = {
-        x: SingleShot,
-        y: MissileShot,
+        x: DoubleShot,
+        y: DoubleMissileShot,
     };
 
     picture = new Picture([
         new Shape([
-            new Point(-1.2, -.95),
-            new Point( 1  ,    0),
-            new Point(-1.2,  .95),
+            new Point(-1  , -.95),
+            new Point( 1.2,    0),
+            new Point(-1  ,  .95),
         ], {stroke: false}),
         new Shape([
-            new Point(-1.2, -.95),
-            new Point( 1  ,    0),
-            new Point(-1.2,  .95),
+            new Point(-1  , -.95),
+            new Point( 1.2,    0),
+            new Point(-1  ,  .95),
         ], {fill: false, close: false}),
-    ], {radiusmul: 1.2});
+    ]);
 }
 
 class ScoutShip extends Ship {
     radius = 6 * RADIUSMUL;
 
-    maxhp = 65;
+    static maxhp = 65;
     wingsOut = true;
 
     shotClassWingsOut = {
@@ -1355,23 +1405,23 @@ class ScoutShip extends Ship {
 
     pictureWingsOut = new Picture([
         new Shape([
-            new Point(-1.2,    0),
-            new Point( -.4,   -1.8),
-            new Point( -.3,   -.75),
-            new Point(   1,    0),
-            new Point( -.3,    .75),
-            new Point( -.4,    1.8),
+            new Point(-1.0,    0),
+            new Point( -.2,   -1.8),
+            new Point( -.1,   -.75),
+            new Point( 1.2,    0),
+            new Point( -.1,    .75),
+            new Point( -.2,    1.8),
         ]),
-    ], {radiusmul: 1.2});
+    ]);
 
     pictureWingsIn = new Picture([
         new Shape([
-            new Point(-1.2,    0),
-            new Point(- .9,   -.75),
-            new Point( 1  ,    0),
-            new Point(- .9,    .75),
+            new Point(-1.0,    0),
+            new Point(- .7,   -.75),
+            new Point( 1.2,    0),
+            new Point(- .7,    .75),
         ]),
-    ], {radiusmul: 1.2});
+    ]);
 
     constructor(field) {
         super(field);
@@ -1418,7 +1468,7 @@ class AssaultShip extends Ship {
     rotspeed = Math.PI / 34;
     rotmul = .65;
 
-    maxhp = 175;
+    static maxhp = 175;
 
     shotClass = {
         x: TripleShot,
@@ -1432,7 +1482,7 @@ class AssaultShip extends Ship {
             new Point( .9,    0),
             new Point(-.4,  .95),
         ]),
-    ], {radiusmul: 1.2});
+    ]);
 }
 
 class TorchShip extends Ship {
@@ -1443,7 +1493,7 @@ class TorchShip extends Ship {
     rotspeed = Math.PI / 40;
     rotmul = .7;
 
-    maxhp = 90;
+    static maxhp = 90;
 
     shotClass = {
         x: FlameShot,
@@ -1495,6 +1545,11 @@ class Shot extends Entity {
 
         // The Ship who shot us out
         this.ship = null;
+    }
+    afterShotBy(entity) {
+        // Bit of a hack, called by Entity.shoot, Entity.emitShots, etc.
+        // Just lets subclasses of Shot customize themselves a bit based
+        // on the entity which shot them.
     }
     step() {
         super.step();
@@ -1576,7 +1631,9 @@ class MissileShot extends Shot {
     radius = 6 * RADIUSMUL;
     static initialSpeed = 8;
     static initialVelMul = .2;
-    velmul = 1.1;
+    velmul = .9;
+
+    thrustSpeed = 3;
 
     hitVelMul = .45;
     hitDamage = 10 * DAMAGEMUL;
@@ -1597,8 +1654,9 @@ class MissileShot extends Shot {
     ]);
 
     step() {
-        if(this.age >= this.maxAge / 2) {
-            this.velmul = .9;
+        if(this.age < this.maxAge / 2) {
+            this.vel.addSpeed(this.thrustSpeed, this.rot);
+        } else {
             this.shouldRenderTrail = false;
         }
         super.step();
@@ -1610,6 +1668,16 @@ class MissileShot extends Shot {
             velmul: .65,
         });
         super.die();
+    }
+}
+
+class DoubleMissileShot extends MissileShot {
+    static initialShots = 2;
+    static initialRotVariance = Math.PI / 9;
+    static initialPosRotVariance = Math.PI / 3;
+    afterShotBy(entity) {
+        super.afterShotBy(entity);
+        this.rot_vel = moduloDiff(this.rot, entity.rot, Math.PI * 2) * 2;
     }
 }
 
@@ -1682,14 +1750,13 @@ class Rock extends Entity {
     constructor(field, radius) {
         super(field);
 
-        var default_hp = 50;
         var default_radius = 10 * RADIUSMUL;
 
         radius = radius || default_radius;
         this.radius = radius;
 
-        this.maxhp = default_hp * radius / default_radius;
-        this.hp = this.maxhp;
+        var default_hp = 50;
+        this.hp = default_hp * radius / default_radius;
 
         var n_points = Random.randIntInclusive(5, 10);
         this.picture = Picture.newPolygon(n_points,
@@ -1737,7 +1804,7 @@ var SHIP_CLASSES = [
 
 var canvas = document.getElementById('canvas');
 
-var game = new Game(canvas);
+var game = new Game(canvas, null, 4);
 var params = new URLSearchParams(window.location.search);
 game.shouldRenderControls = !Boolean(params.get('nocontrols'));
 
