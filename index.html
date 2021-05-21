@@ -537,16 +537,20 @@ class Sprite extends Particle {
 
         for(var addx = addx0; addx <= addx0 + fieldx; addx += fieldx) {
             for(var addy = addy0; addy <= addy0 + fieldy; addy += fieldy) {
-                if(this.shouldRenderTrail) this.renderTrail(
-                    canvas, camera, addx, addy);
-                if(this.shouldRenderCircle || RENDER_CIRCLES) {
-                    this.renderCircle(
-                        canvas, camera, addx, addy);
+                if(this.shouldRenderTrail) {
+                    this.renderTrail(canvas, camera, addx, addy);
                 }
-                if(this.picture) this.picture.render(
-                    this, canvas, camera, addx, addy);
+                if(this.shouldRenderCircle || RENDER_CIRCLES) {
+                    this.renderCircle(canvas, camera, addx, addy);
+                }
+                if(this.picture) {
+                    this.renderPicture(canvas, camera, addx, addy);
+                }
             }
         }
+    }
+    renderPicture(canvas, camera, addx, addy) {
+        this.picture.render(this, canvas, camera, addx, addy);
     }
     renderTrail(canvas, camera, addx, addy) {
         var x0 = this.pos.x + addx;
@@ -626,6 +630,7 @@ class Entity extends Sprite {
     velmul = .95;
     rotspeed = Math.PI / 25;
     rotmul = .5;
+
     maxAge = -1;
     fadeWithAge = false;
 
@@ -640,10 +645,12 @@ class Entity extends Sprite {
     thrustEffectEvery = 3;
     thrustEffectCooldown = 0;
 
-    hp = -1;
+    maxhp = -1;
 
     constructor(field) {
         super(field);
+
+        this.hp = this.maxhp;
 
         this.rot = 0;
         this.rot_vel = 0;
@@ -781,7 +788,14 @@ class Entity extends Sprite {
             + getRotVariance(serial_shot_i, cls.serialShots)
                 * cls.serialRotVariance;
 
+        var posrot = 0
+            + getRotVariance(shot_i, cls.initialShots)
+                * cls.initialPosRotVariance
+            + getRotVariance(serial_shot_i, cls.serialShots)
+                * cls.serialPosRotVariance;
+
         shot.pos.copy(this.pos)
+            .addSpeed(this.radius, shot.rot + posrot)
             .addSpeed(cls.initialSpeed, shot.rot);
         shot.vel.copy(this.vel)
             .mul(cls.initialVelMul)
@@ -1053,14 +1067,14 @@ class Game {
         ctx.fillText('Controls:', x, y);
         y += 26;
 
-        ctx.font = 'normal 18px sans-serif';
+        ctx.font = 'normal 18px monospace';
         var lines = [
-            'Left/right arrow keys: turn left/right',
-            'Up/down arrow keys: thrust/reverse',
-            'Spacebar: primary space gun',
-            'Z: secondary space gun',
-            'Escape: return to menu',
-            'Enter: toggle display controls',
+            'Left/right: turn left/right',
+            'Up/down   : thrust/reverse',
+            'Spacebar  : space gun #1',
+            'Z         : space gun #2',
+            'Escape    : return to menu',
+            'Enter     : show/hide controls',
         ];
         for(var line of lines) {
             ctx.fillText(line, x, y);
@@ -1210,7 +1224,7 @@ class SmokeEffect extends Effect {
 class ThrustEffect extends Effect {
     radius = 5 * RADIUSMUL;
     shouldRenderTrail = true;
-    trailStart = .7;
+    trailEnd = .3;
     trailStrokeStyle = 'rgba(0,255,255,.5)';
     trailLineWidth = 3;
     maxAge = 20;
@@ -1219,14 +1233,14 @@ class ThrustEffect extends Effect {
 class SparkEffect extends Effect {
     radius = 3 * RADIUSMUL;
     shouldRenderTrail = true;
-    trailStart = .7;
+    trailEnd = .3;
     trailStrokeStyle = 'rgba(255,255,0,.5)';
     velmul = .95;
     maxAge = 20;
 }
 
 class Ship extends Entity {
-    hp = 100;
+    maxhp = 100;
 
     die() {
         this.emitEffects(SmokeEffect, 4, 3, 6, .65);
@@ -1236,6 +1250,11 @@ class Ship extends Entity {
 
 class FighterShip extends Ship {
     radius = 6 * RADIUSMUL;
+    thrustSpeed = 2;
+    reverseSpeed = 1.25;
+    velmul = .95;
+    rotspeed = Math.PI / 25;
+    rotmul = .5;
 
     shotClass = {
         x: SingleShot,
@@ -1256,6 +1275,79 @@ class FighterShip extends Ship {
     ], {radiusmul: 1.2});
 }
 
+class ScoutShip extends Ship {
+    radius = 4 * RADIUSMUL;
+
+    maxhp = 65;
+    wingsOut = true;
+
+    shotClassWingsOut = {
+        x: QuadrupleShot,
+        y: null,
+    };
+
+    shotClassWingsIn = {
+        x: RapidSingleShot,
+        y: null,
+    };
+
+    pictureWingsOut = new Picture([
+        new Shape([
+            new Point(-1.2,    0),
+            new Point( -.4,   -1.8),
+            new Point( -.3,   -.75),
+            new Point(   1,    0),
+            new Point( -.3,    .75),
+            new Point( -.4,    1.8),
+        ]),
+    ], {radiusmul: 1.2});
+
+    pictureWingsIn = new Picture([
+        new Shape([
+            new Point(-1.2,    0),
+            new Point(- .9,   -.75),
+            new Point( 1  ,    0),
+            new Point(- .9,    .75),
+        ]),
+    ], {radiusmul: 1.2});
+
+    constructor(field) {
+        super(field);
+        this._updateStats();
+    }
+    _updateStats() {
+        if(this.wingsOut) {
+            this.thrustSpeed = 2.25;
+            this.reverseSpeed = 1.5;
+            this.velmul = .85;
+            this.rotspeed = Math.PI / 25;
+            this.rotmul = .6;
+            this.picture = this.pictureWingsOut;
+            this.shotClass = this.shotClassWingsOut;
+        } else {
+            this.thrustSpeed = 2.75;
+            this.reverseSpeed = 1.75;
+            this.velmul = .95;
+            this.rotspeed = Math.PI / 20;
+            this.rotmul = .4;
+            this.picture = this.pictureWingsIn;
+            this.shotClass = this.shotClassWingsIn;
+        }
+    }
+    fire(keyname) {
+        if(keyname === 'y') {
+            this.wingsOut = !this.wingsOut;
+            this._updateStats();
+
+            var shotprops = this.shotprops[keyname];
+            shotprops.cooldown += 6;
+            shotprops.n_shots++;
+        } else {
+            super.fire(keyname);
+        }
+    }
+}
+
 class AssaultShip extends Ship {
     radius = 9 * RADIUSMUL;
     thrustSpeed = 1.25;
@@ -1264,7 +1356,7 @@ class AssaultShip extends Ship {
     rotspeed = Math.PI / 30;
     rotmul = .65;
 
-    hp = 175;
+    maxhp = 175;
 
     shotClass = {
         x: TripleShot,
@@ -1289,6 +1381,8 @@ class Shot extends Entity {
     // and last Shot instance produced by firing this Shot type
     static initialRotVariance = 0;
     static serialRotVariance = 0;
+    static initialPosRotVariance = 0;
+    static serialPosRotVariance = 0;
 
     static initialSpeed = 20;
     static initialVelMul = 1;
@@ -1331,6 +1425,14 @@ class SingleShot extends Shot {
     fadeWithAge = true;
 }
 
+class RapidSingleShot extends SingleShot {
+    hitDamage = 6;
+    static cooldown = 2;
+    hitVelMul = .05;
+    trailStrokeStyle = '#aaa';
+    trailEnd = .3;
+}
+
 class DoubleShot extends SingleShot {
     static serialShots = 2;
     static serialRotVariance = Math.PI / 18;
@@ -1342,6 +1444,13 @@ class TripleShot extends SingleShot {
     static initialRotVariance = Math.PI / 13;
     static serialRotVariance = 0;
     static cooldown = 8;
+}
+
+class QuadrupleShot extends SingleShot {
+    static serialShots = 4;
+    static serialRotVariance = Math.PI / 20;
+    static serialPosRotVariance = Math.PI;
+    static cooldown = 2;
 }
 
 class BlasterShot extends Shot {
@@ -1429,7 +1538,8 @@ class Rock extends Entity {
         radius = radius || default_radius;
         this.radius = radius;
 
-        this.hp = default_hp * radius / default_radius;
+        this.maxhp = default_hp * radius / default_radius;
+        this.hp = this.maxhp;
 
         var n_points = Random.randIntInclusive(5, 10);
         this.picture = Picture.newPolygon(n_points,
@@ -1466,6 +1576,7 @@ class Rock extends Entity {
 
 var SHIP_CLASSES = [
     FighterShip,
+    ScoutShip,
     AssaultShip,
 ];
 
