@@ -148,6 +148,9 @@ class Point {
         }
         return Math.sqrt(dx * dx + dy * dy);
     }
+    angle() {
+        return Math.atan2(-this.y, this.x);
+    }
     copy(other) {
         this.x = other.x;
         this.y = other.y;
@@ -354,6 +357,12 @@ class Field {
         for(var shot of this.shots) {
             for(var ship of this.ships) {
                 if(ship === shot.ship) continue;
+
+                // Bit of a hack, making sure turrets can't damage
+                // their FlagShip.
+                // TODO: handle this with teams?..
+                if(shot.ship === ship.turret) continue;
+
                 if(shot.colliding(ship)) shot.hit(ship);
             }
             for(var rock of this.rocks) {
@@ -371,6 +380,15 @@ class Field {
             for(var ship of this.ships) {
                 if(rock.colliding(ship)) {
                     rock.handleCollision(ship);
+                }
+            }
+        }
+
+        for(var ship of this.ships) {
+            for(var other of this.ships) {
+                if(ship === other) continue;
+                if(ship.colliding(other)) {
+                    ship.handleCollision(other);
                 }
             }
         }
@@ -887,19 +905,16 @@ class Entity extends Sprite {
         /* Distance between this and other */
         var dist = this.pos.dist(other.pos, this.field.size);
 
+        /* Avoid div by zero, eh */
+        if(dist < .1) dist = .1;
+
         /* Target distance: this and other are just barely touching */
         var tdist = this.radius + other.radius;
 
         /* dx, dy: shortest vector from this to other, on the torus
         represented by this.field.size */
-        var dx = other.pos.x - this.pos.x;
-        var dy = other.pos.y - this.pos.y;
-        var fieldx = this.field.size.x;
-        var fieldy = this.field.size.y;
-        if(dx < -fieldx / 2) dx += fieldx;
-        if(dx >  fieldx / 2) dx -= fieldx;
-        if(dy < -fieldy / 2) dy += fieldy;
-        if(dy >  fieldy / 2) dy -= fieldy;
+        var dx = moduloDiff(this.pos.x, other.pos.x, this.field.size.x);
+        var dy = moduloDiff(this.pos.y, other.pos.y, this.field.size.y);
 
         /* mx, my: vector which would move this away from other, to where
         they are just barely touching */
@@ -1300,7 +1315,14 @@ class TitleMenu extends Menu {
             ship.pos.copy(old_ship.pos);
             ship.vel.copy(old_ship.vel);
             ship.rot = old_ship.rot;
+
             old_ship.remove();
+            // HACK: old_ship has only been marked for removal, we now
+            // manually call the function which truly removes it.
+            // We do this because otherwise, the old and new ships
+            // coexist for one frame, which is enough time for them
+            // to collide with each other...
+            this.game.field.removeEntities(this.game.field.ships);
         } else {
             ship.pos.setMidpoint(this.game.field.size);
         }
@@ -1510,6 +1532,105 @@ class TorchShip extends Ship {
     ]);
 }
 
+class TurretShip extends Ship {
+    radius = 6 * RADIUSMUL;
+    thrustSpeed = .65;
+    reverseSpeed = .45;
+    velmul = .95;
+    rotspeed = Math.PI / 40;
+    rotmul = .7;
+
+    static maxhp = 60;
+
+    shotClass = {
+        x: QuadrupleShot,
+        y: QuadrupleMissileShot,
+    };
+
+    picture = new Picture([
+        Shape.newPolygon(6),
+        new Shape([
+            new Point(0  , 0),
+            new Point(1.2, 0),
+        ], {fill: false, close: false}),
+    ]);
+}
+
+class FlagShip extends Ship {
+    radius = 10.5 * RADIUSMUL;
+    thrustSpeed = 1.25;
+    reverseSpeed = 1.25;
+    velmul = .9;
+    rotspeed = Math.PI / 34;
+    rotmul = .5;
+
+    static maxhp = 150;
+
+    static max_turret_cooldown = 20;
+
+    picture = new Picture([
+        new Shape([
+            new Point(-.9, -.3),
+            new Point(-.7, -.5),
+            new Point( .9, -.5),
+            new Point( .9,  .5),
+            new Point(-.7,  .5),
+            new Point(-.9,  .3),
+        ]),
+    ], {radiusmul: 1.2});
+
+    constructor(field) {
+        super(field);
+
+        this.turret = null;
+        this.turret_cooldown = this.constructor.max_turret_cooldown;
+    }
+    remove() {
+        if(this.turret) this.turret.die();
+        super.remove();
+    }
+    addTurret() {
+        if(this.turret) return;
+        var turret = this.field.addShip(TurretShip);
+        turret.pos.copy(this.pos)
+            .addSpeed(this.radius + turret.radius, this.rot);
+        turret.vel.copy(this.vel);
+        this.turret = turret;
+        this.turret_cooldown = this.constructor.max_turret_cooldown;
+    }
+    step() {
+        super.step();
+        if(this.turret) {
+            for(var keyname of 'xy') {
+                var key = this.keys[keyname];
+                this.turret.keys[keyname].copy(key);
+            }
+
+            // Keep turret pointed away from us (so we can aim it
+            // by positioning ourselves)
+            var dx = this.pos.x - this.turret.pos.x;
+            var dy = this.pos.y - this.turret.pos.y;
+            if(dx && dy) {
+                var angle = Math.atan2(-dy, dx);
+                var anglediff = moduloDiff(
+                    this.turret.rot, angle + Math.PI, Math.PI * 2);
+                this.turret.rot_vel += anglediff * .2;
+            }
+
+            var dist = this.pos.dist(this.turret.pos);
+            var tdist = 30 * RADIUSMUL;
+            // TODO: spring physics between turret and us
+
+        } else {
+            if(this.turret_cooldown) {
+                this.turret_cooldown--;
+            } else {
+                this.addTurret();
+            }
+        }
+    }
+}
+
 class Shot extends Entity {
 
     static initialShots = 1;
@@ -1661,6 +1782,10 @@ class MissileShot extends Shot {
         }
         super.step();
     }
+    afterShotBy(entity) {
+        super.afterShotBy(entity);
+        this.rot_vel = moduloDiff(this.rot, entity.rot, Math.PI * 2) * 2;
+    }
     die() {
         this.emitEffects(SmokeEffect, 3, {
             speed_min: 3,
@@ -1675,10 +1800,13 @@ class DoubleMissileShot extends MissileShot {
     static initialShots = 2;
     static initialRotVariance = Math.PI / 9;
     static initialPosRotVariance = Math.PI / 3;
-    afterShotBy(entity) {
-        super.afterShotBy(entity);
-        this.rot_vel = moduloDiff(this.rot, entity.rot, Math.PI * 2) * 2;
-    }
+}
+
+class QuadrupleMissileShot extends MissileShot {
+    static serialShots = 4;
+    static serialRotVariance = Math.PI / 4;
+    static serialPosRotVariance = Math.PI;
+    static cooldown = 8;
 }
 
 class FlameShot extends Shot {
@@ -1799,6 +1927,8 @@ var SHIP_CLASSES = [
     ScoutShip,
     AssaultShip,
     TorchShip,
+    TurretShip,
+    FlagShip,
 ];
 
 
