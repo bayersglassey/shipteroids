@@ -792,6 +792,9 @@ class Entity extends Sprite {
 
     static maxhp = -1;
 
+    addhp = 1;
+    addhp_per_age = 40;
+
     constructor(field) {
         super(field);
 
@@ -852,6 +855,10 @@ class Entity extends Sprite {
         this.handleKeys();
         for(var keyname of Key.KEYNAMES) {
             this.keys[keyname].step();
+        }
+
+        if(this.age % this.addhp_per_age === 0) {
+            if((this.hp += this.addhp) > this.maxhp) this.hp = this.maxhp;
         }
 
         super.step();
@@ -1280,13 +1287,20 @@ class Game {
         var ctx = canvas.getContext('2d');
         ctx.fillStyle = '#fff';
         ctx.textAlign = 'center';
+        ctx.font = 'normal bold 24px sans-serif';
 
         var x = canvas.width / 2;
         var y = canvas.height - 24;
 
         var text = parseInt(entity.hp) + ' / ' + entity.maxhp;
-        ctx.font = 'normal bold 24px sans-serif';
         ctx.fillText(text, x, y);
+        y += 20;
+
+        if(entity.rock) {
+            var text = parseInt(entity.rock.hp) + ' / ' + entity.rock.maxhp;
+            ctx.fillText(text, x, y);
+            y += 20;
+        }
     }
     renderControls() {
         var canvas = this.canvas;
@@ -2041,10 +2055,11 @@ class QuadrupleShot extends SingleShot {
 class BlasterShot extends Shot {
     radius = 8 * RADIUSMUL;
     static initialSpeed = 12;
+    static initialVelMul = .7;
     velmul = 1;
 
     hitVelMul = .5;
-    hitDamage = 20 * DAMAGEMUL;
+    hitDamage = 15 * DAMAGEMUL;
 
     maxAge = 20;
     static cooldown = 32;
@@ -2165,7 +2180,7 @@ class MineShot extends Shot {
     static initialSpeed = 0;
     velmul = .9;
 
-    hitDamage = 20 * DAMAGEMUL;
+    hitDamage = 15 * DAMAGEMUL;
 
     maxAge = 300;
     static cooldown = 32;
@@ -2200,7 +2215,8 @@ class Rock extends Entity {
         this.radius = radius;
 
         var default_hp = 50;
-        this.hp = this.maxhp = default_hp * radius / DEFAULT_ROCK_RADIUS;
+        this.hp = this.maxhp = parseInt(
+            default_hp * radius / DEFAULT_ROCK_RADIUS);
 
         var n_points = Random.randIntInclusive(5, 10);
         this.picture = Picture.newPolygon(n_points,
