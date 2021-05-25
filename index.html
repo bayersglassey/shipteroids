@@ -18,23 +18,39 @@ body {
 </head>
 <body>
 <div class="canvas-container">
-    <canvas id="canvas" class="canvas" width=600 height=600 tabindex=-1></canvas>
+    <canvas id="canvas" class="canvas" width=800 height=800 tabindex=-1></canvas>
 </div>
 <script>
 
 'use strict';
 
 
+// query params
+var PARAMS = new URLSearchParams(window.location.search);
+function getParam(name, default_value) {
+    var value = PARAMS.get(name);
+    return value === null? default_value: value;
+}
+function getBoolParam(name) {
+    return Boolean(getParam(name, false));
+}
+
 // debug stuff
-var TIMING = false;
-var RENDER_CIRCLES = false;
-var RENDER_BOUNDARY = false;
+var TIMING = getBoolParam('timing');
+var RENDER_CIRCLES = getBoolParam('render_circles');
+var RENDER_BOUNDARY = getBoolParam('render_boundary');
 
 // physics tweaking stuff
 var VELMUL = .7;
-var ROTVELMUL = .7;
+var ROTVELMUL = .5;
 var RADIUSMUL = 2;
 var DAMAGEMUL = 1.5;
+
+// Game/field default options
+var DEFAULT_STARS_PER   =    5000;
+var DEFAULT_ROCKS_PER   =  300000;
+var DEFAULT_PLANETS_PER = 1000000;
+var DEFAULT_SHIPS_PER   =  500000;
 
 // keyCode values
 var KEY_U = 38;
@@ -50,6 +66,10 @@ var KEY_ESCAPE = 27;
 function linear(x0, x1, n) {
     /* Assumes: 0 <= n <= 1 */
     return x0 + (x1 - x0) * n;
+}
+
+function getDefault(value, default_value) {
+    return value === undefined? default_value: value;
 }
 
 function modulo(x, n) {
@@ -112,6 +132,25 @@ class Random {
     static randRotation() {
         return this.randNumber(Math.PI * 2);
     }
+    static randColor(min, max) {
+        if(max === undefined) {
+            max = min;
+            min = 0;
+        }
+        if(max === undefined) max = 256;
+
+        var r = this.randInt(min, max);
+        var g = this.randInt(min, max);
+        var b = this.randInt(min, max);
+        return Color.rgb(r, g, b);
+    }
+}
+
+class Color {
+    /* Helper functions for creating CSS colours */
+    static rgb(r, g, b, a) {
+        return 'rgb(' + r + ',' + g + ',' + b + ')';
+    }
 }
 
 class Point {
@@ -148,8 +187,22 @@ class Point {
         }
         return Math.sqrt(dx * dx + dy * dy);
     }
-    angle() {
-        return Math.atan2(-this.y, this.x);
+    angle(other, modulo) {
+        var dx, dy;
+        if(other) {
+            if(modulo) {
+                dx = moduloDiff(other.x, this.x, modulo.x);
+                dy = moduloDiff(other.y, this.y, modulo.y);
+            } else {
+                dx = other.x - this.x;
+                dy = other.y - this.y;
+            }
+        } else {
+            dx = this.x;
+            dy = this.y;
+        }
+        if(!dx || !dy) return undefined;
+        return Math.atan2(-dy, dx);
     }
     copy(other) {
         this.x = other.x;
@@ -239,8 +292,8 @@ class Field {
     The edges of the rectangle "wrap around" (or you can say it's a
     "torus" if you prefer). */
 
-    DEFAULT_WIDTH = 1000;
-    DEFAULT_HEIGHT = 1000;
+    DEFAULT_WIDTH = 2500;
+    DEFAULT_HEIGHT = 3500;
 
     constructor(game, size) {
         size = size? size.clone(): new Point(
@@ -254,6 +307,7 @@ class Field {
         this.stars = [];
 
         this.entityArrays = [];
+        this.planets = this.addEntityArray();
         this.ships = this.addEntityArray();
         this.shots = this.addEntityArray();
         this.effects = this.addEntityArray();
@@ -265,10 +319,22 @@ class Field {
         this.innerCanvas = document.createElement('canvas');
         this.innerCanvas.width = size.x;
         this.innerCanvas.height = size.y;
+    }
+    populate(opts) {
+        var stars_per   = getDefault(opts.stars_per,   DEFAULT_STARS_PER);
+        var rocks_per   = getDefault(opts.rocks_per,   DEFAULT_ROCKS_PER);
+        var planets_per = getDefault(opts.planets_per, DEFAULT_PLANETS_PER);
+        var ships_per   = getDefault(opts.ships_per,   DEFAULT_SHIPS_PER);
+
+        var area = this.size.x * this.size.y;
+        var n_stars = area / stars_per;
+        var n_rocks = area / rocks_per;
+        var n_planets = area / planets_per;
+        var n_ships = area / ships_per;
 
         /* Add some random stars */
-        var n_stars = size.x * size.y / 3000;
         var star_vel_rot = Random.randRotation();
+        var star_speed = Random.randNumber(1.5, 4.5);
         for(var i = 0; i < n_stars; i++) {
             var star = new Star(this);
             this.stars.push(star);
@@ -287,8 +353,7 @@ class Field {
                 + color_component + ','
                 + color_component + ','
                 + color_component + ')';
-            var star_speed = 2 * distance;
-            star.vel.setSpeed(star_speed, star_vel_rot);
+            star.vel.setSpeed(star_speed * distance, star_vel_rot);
             star.distance = distance;
         }
 
@@ -297,9 +362,25 @@ class Field {
         therefore "painted over" by closer stars. */
         this.stars.sort((s1, s2) => Math.sign(s2.distance - s1.distance));
 
-        var n_rocks = size.x * size.y / 100000;
+        // Add rocks
         for(var i = 0; i < n_rocks; i++) {
             var rock = this.addRock(Rock);
+        }
+
+        // Add planets
+        for(var i = 0; i < n_planets; i++) {
+            var planet = this.addPlanet(Planet);
+        }
+
+        // Add ships
+        for(var i = 0; i < n_ships; i++) {
+            var cls = Random.choice(SHIP_CLASSES);
+            var ship = this.game.addShip(cls);
+            ship.pos.setRandomWithin(this.size);
+            ship.rot = Random.randRotation();
+
+            var player = this.game.addCPUPlayer();
+            player.setEntity(ship);
         }
     }
     addEntityArray() {
@@ -335,9 +416,14 @@ class Field {
         return entity;
     }
     addRock(cls, radius) {
-        radius = radius || Random.randNumber(7, 25) * RADIUSMUL;
+        radius = radius || Random.randNumber(7, 32) * RADIUSMUL;
         var entity = new cls(this, radius);
         this.rocks.pending.push(entity);
+        return entity;
+    }
+    addPlanet(cls) {
+        var entity = new cls(this);
+        this.planets.pending.push(entity);
         return entity;
     }
     addPendingEntities(entityArray) {
@@ -356,13 +442,7 @@ class Field {
 
         for(var shot of this.shots) {
             for(var ship of this.ships) {
-                if(ship === shot.ship) continue;
-
-                // Bit of a hack, making sure turrets can't damage
-                // their FlagShip.
-                // TODO: handle this with teams?..
-                if(shot.ship === ship.turret) continue;
-
+                if(shot.ship && ship.isAlly(shot.ship)) continue;
                 if(shot.colliding(ship)) shot.hit(ship);
             }
             for(var rock of this.rocks) {
@@ -389,6 +469,15 @@ class Field {
                 if(ship === other) continue;
                 if(ship.colliding(other)) {
                     ship.handleCollision(other);
+                }
+            }
+        }
+
+        for(var planet of this.planets) {
+            for(var other of this.planets) {
+                if(planet === other) continue;
+                if(planet.colliding(other)) {
+                    planet.handleCollision(other);
                 }
             }
         }
@@ -563,7 +652,7 @@ class Sprite extends Particle {
     shouldRenderTrail = false;
     trailStart = 0;
     trailEnd   = 1;
-    trailCamVel = 0;
+    trailCamVel = 1;
     trailStrokeStyle = 'rgba(255,150,0,25)';
     trailLineWidth = 2;
 
@@ -595,8 +684,8 @@ class Sprite extends Particle {
     renderTrail(canvas, camera, addx, addy) {
         var x0 = this.pos.x + addx;
         var y0 = this.pos.y + addy;
-        var x1 = x0 - this.vel.x - camera.vel.x * this.trailCamVel;
-        var y1 = y0 - this.vel.y - camera.vel.y * this.trailCamVel;
+        var x1 = x0 - this.vel.x + camera.vel.x * this.trailCamVel;
+        var y1 = y0 - this.vel.y + camera.vel.y * this.trailCamVel;
         var trail_x0 = linear(x0, x1, this.trailStart);
         var trail_y0 = linear(y0, y1, this.trailStart);
         var trail_x1 = linear(x0, x1, this.trailEnd);
@@ -614,17 +703,26 @@ class Sprite extends Particle {
         var x0 = this.pos.x + addx;
         var y0 = this.pos.y + addy;
         var ctx = canvas.getContext('2d');
+
         ctx.strokeStyle = this.circleStrokeStyle;
         ctx.lineWidth = this.circleLineWidth;
         ctx.fillStyle = this.circleFillStyle;
-        ctx.beginPath();
-        ctx.arc(x0, y0, this.radius, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.fill();
+
+        ctx.save();
+        ctx.translate(x0, y0);
+        ctx.rotate(this.rot);
+        {
+            ctx.beginPath();
+            ctx.arc(0, 0, this.radius, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.fill();
+        }
+        ctx.restore();
     }
 }
 
 class Star extends Sprite {
+    radius = 3 * RADIUSMUL;
     shouldRenderTrail = true;
     trailLineWidth = 1;
     trailCamVel = 1;
@@ -983,6 +1081,7 @@ class Camera extends Particle {
     setTarget(target) {
         this.unsetTarget();
         this.target = target;
+        this.pos.copy(target.pos);
     }
     unsetTarget() {
         if(!this.target) return;
@@ -1029,8 +1128,28 @@ class Player {
     }
 }
 
+class CPUPlayer extends Player {
+    step() {
+        if(Math.random() < .1) this.keys.u.down();
+        if(Math.random() < .1) this.keys.u.up();
+        if(Math.random() < .1) this.keys.d.down();
+        if(Math.random() < .1) this.keys.d.up();
+        if(Math.random() < .1) this.keys.l.down();
+        if(Math.random() < .1) this.keys.l.up();
+        if(Math.random() < .1) this.keys.r.down();
+        if(Math.random() < .1) this.keys.r.up();
+        if(Math.random() < .1) this.keys.x.down();
+        if(Math.random() < .1) this.keys.x.up();
+        if(Math.random() < .1) this.keys.y.down();
+        if(Math.random() < .1) this.keys.y.up();
+        super.step();
+    }
+}
+
 class Game {
-    constructor(canvas, fieldSize, n_ships) {
+    constructor(canvas, opts) {
+        opts = opts || {};
+
         canvas.addEventListener('keydown', this.onKeyDown.bind(this));
         canvas.addEventListener('keyup', this.onKeyUp.bind(this));
 
@@ -1044,28 +1163,25 @@ class Game {
         Player instances in this.players */
         this.keysByCode = {};
 
-        this._newGame(fieldSize, n_ships);
+        this._newGame(opts);
     }
-    _newGame(fieldSize, n_ships) {
-        n_ships = n_ships || 0;
+    _newGame(opts) {
 
-        this.field = new Field(this, fieldSize);
+        this.cpus = [];
+        this.field = new Field(this);
         this.camera = new Camera(this.field);
-        this.n_ships = n_ships;
 
-        for(var i = 0; i < n_ships; i++) {
-            var cls = Random.choice(SHIP_CLASSES);
-            var ship = this.addShip(cls);
-            ship.pos.setRandomWithin(this.field.size);
-            ship.rot = Random.randRotation();
-        }
+        this.field.populate(opts);
+
+        // Save opts for use with this.reset()
+        this.opts = opts;
     }
-    newGame(fieldSize, n_ships) {
+    newGame(opts) {
         this.cleanup();
-        this._newGame(fieldSize, n_ships);
+        this._newGame(opts);
     }
     reset() {
-        this.newGame(this.field.size, this.n_ships);
+        this.newGame(this.opts);
     }
     cleanup() {
         this.field.cleanup();
@@ -1126,8 +1242,14 @@ class Game {
         this.players.push(player);
         return player;
     }
+    addCPUPlayer() {
+        var player = new CPUPlayer();
+        this.cpus.push(player);
+        return player;
+    }
     step() {
         for(var player of this.players) player.step();
+        for(var player of this.cpus) player.step();
         this.field.step();
         this.camera.step();
     }
@@ -1380,6 +1502,14 @@ class Ship extends Entity {
         });
         super.die();
     }
+    isAlly(other) {
+        if(this === other) return true;
+        return this._isAlly(other) || other._isAlly(this);
+    }
+    _isAlly(other) {
+        // May be overridden by subclasses
+        return false;
+    }
 }
 
 class FighterShip extends Ship {
@@ -1534,8 +1664,8 @@ class TorchShip extends Ship {
 
 class TurretShip extends Ship {
     radius = 6 * RADIUSMUL;
-    thrustSpeed = .65;
-    reverseSpeed = .45;
+    thrustSpeed = .95;
+    reverseSpeed = .55;
     velmul = .95;
     rotspeed = Math.PI / 40;
     rotmul = .7;
@@ -1554,6 +1684,17 @@ class TurretShip extends Ship {
             new Point(1.2, 0),
         ], {fill: false, close: false}),
     ]);
+
+    flagship = null;
+
+    remove() {
+        if(this.flagship) this.flagship.removeTurret(this);
+        super.remove();
+    }
+    _isAlly(other) {
+        if(other.flagship && other.flagship === this.flagship) return true;
+        return super._isAlly(other);
+    }
 }
 
 class FlagShip extends Ship {
@@ -1564,9 +1705,15 @@ class FlagShip extends Ship {
     rotspeed = Math.PI / 34;
     rotmul = .5;
 
+    shotClass = {
+        x: null,
+        y: MissileShot,
+    };
+
     static maxhp = 150;
 
-    static max_turret_cooldown = 20;
+    static max_turret_cooldown = 100;
+    static max_turrets = 2;
 
     picture = new Picture([
         new Shape([
@@ -1582,49 +1729,66 @@ class FlagShip extends Ship {
     constructor(field) {
         super(field);
 
-        this.turret = null;
+        this.turrets = [];
         this.turret_cooldown = this.constructor.max_turret_cooldown;
     }
     remove() {
-        if(this.turret) this.turret.die();
+        // We iterate over a copy of this.turrets, because when we kill
+        // each turret, it removes itself from this.turrets, which would
+        // mess up an iteration over this.turrets.
+        var turrets = this.turrets.slice();
+        for(var turret of turrets) turret.die();
         super.remove();
     }
     addTurret() {
-        if(this.turret) return;
         var turret = this.field.addShip(TurretShip);
         turret.pos.copy(this.pos)
             .addSpeed(this.radius + turret.radius, this.rot);
         turret.vel.copy(this.vel);
-        this.turret = turret;
+        turret.flagship = this;
+
+        this.turrets.push(turret);
         this.turret_cooldown = this.constructor.max_turret_cooldown;
+        return turret;
+    }
+    removeTurret(turret) {
+        var i = this.turrets.indexOf(turret);
+        this.turrets.splice(i, 1);
+        turret.flagship = null;
+    }
+    _isAlly(other) {
+        if(this.turrets.indexOf(other) >= 0) return true;
+        return super._isAlly(other);
     }
     step() {
         super.step();
-        if(this.turret) {
-            for(var keyname of 'xy') {
+        for(var turret of this.turrets) {
+            for(var keyname of 'x') {
                 var key = this.keys[keyname];
-                this.turret.keys[keyname].copy(key);
+                turret.keys[keyname].copy(key);
+            }
+            for(var keyname of 'lrud') {
+                var key = this.keys[keyname];
+                turret.keys[keyname].up(key);
             }
 
-            // Keep turret pointed away from us (so we can aim it
-            // by positioning ourselves)
-            var dx = this.pos.x - this.turret.pos.x;
-            var dy = this.pos.y - this.turret.pos.y;
-            if(dx && dy) {
-                var angle = Math.atan2(-dy, dx);
-                var anglediff = moduloDiff(
-                    this.turret.rot, angle + Math.PI, Math.PI * 2);
-                this.turret.rot_vel += anglediff * .2;
+            var targetAngle = turret.pos.angle(this.pos, this.field.size);
+            turret.rot_vel += moduloDiff(
+                turret.rot, targetAngle, Math.PI * 2) * .2;
+
+            var dist = this.pos.dist(turret.pos, this.field.size);
+            var mindist = 45 * RADIUSMUL;
+            var maxdist = 65 * RADIUSMUL;
+            if(dist < mindist) {
+                turret.keys.u.down();
+            } else if(dist > maxdist) {
+                turret.keys.d.down();
             }
-
-            var dist = this.pos.dist(this.turret.pos);
-            var tdist = 30 * RADIUSMUL;
-            // TODO: spring physics between turret and us
-
+        }
+        if(this.turret_cooldown) {
+            this.turret_cooldown--;
         } else {
-            if(this.turret_cooldown) {
-                this.turret_cooldown--;
-            } else {
+            if(this.turrets.length < this.constructor.max_turrets) {
                 this.addTurret();
             }
         }
@@ -1764,6 +1928,7 @@ class MissileShot extends Shot {
     static cooldown = 24;
 
     shouldRenderTrail = true;
+    trailCamVel = 0;
 
     picture = new Picture([
         new Shape([
@@ -1862,9 +2027,6 @@ class MineShot extends Shot {
             speed_max: 6,
         });
 
-        // The flames emitted by a mine damage the ship who laid the mine!
-        for(var shot of shots) shot.ship = null;
-
         super.die();
     }
 }
@@ -1921,6 +2083,54 @@ class Rock extends Entity {
     }
 }
 
+class Planet extends Entity {
+
+    shouldRenderCircle = true;
+    shouldRenderCircleLine = false;
+    circleStrokeStyle = 'transparent';
+    circleFillStyle = 'rgb(0,0,255)';
+
+    velmul = 1;
+    rotmul = 1;
+
+    constructor(field) {
+        super(field);
+
+        this.radius = Random.randNumber(50,200);
+        this.circleFillStyle = this.createFillGradient();
+
+        this.pos.setRandomWithin(field.size);
+
+        var speed = Random.randNumber(6,9) * VELMUL;
+        this.vel.setSpeed(speed, Random.randRotation());
+
+        this.rot_vel = Random.randNumber(-.5, .5) * Math.PI / 40;
+    }
+    createFillGradient() {
+        var canvas = this.field.game.canvas;
+        var ctx = canvas.getContext('2d');
+
+        var innerPosSpeed = Random.randNumber(this.radius);
+        var innerPos = new Point()
+            .addSpeed(innerPosSpeed, Random.randRotation());
+
+        var gradient = ctx.createRadialGradient(
+            // x0, y0, r0
+            innerPos.x, innerPos.y, 0,
+            // x1, y1, r1
+            0, 0, this.radius);
+
+        var c0 = Random.randColor(50, 150);
+        var c1 = Random.randColor(50, 100);
+        var c2 = Random.randColor(100);
+
+        gradient.addColorStop(.5, c0);
+        gradient.addColorStop(.75, c1);
+        gradient.addColorStop(1, c2);
+        return gradient;
+    }
+}
+
 
 var SHIP_CLASSES = [
     FighterShip,
@@ -1934,9 +2144,8 @@ var SHIP_CLASSES = [
 
 var canvas = document.getElementById('canvas');
 
-var game = new Game(canvas, null, 4);
-var params = new URLSearchParams(window.location.search);
-game.shouldRenderControls = !Boolean(params.get('nocontrols'));
+var game = new Game(canvas);
+game.shouldRenderControls = !Boolean(PARAMS.get('nocontrols'));
 
 var player = game.addPlayer();
 game.mapKey(player.keys.u, KEY_U);
