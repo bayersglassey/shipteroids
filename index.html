@@ -45,6 +45,7 @@ var VELMUL = .7;
 var ROTVELMUL = .5;
 var RADIUSMUL = 2;
 var DAMAGEMUL = 1.5;
+var DEFAULT_ROCK_RADIUS = 10 * RADIUSMUL;
 
 // Game/field default options
 var DEFAULT_FIELD_WIDTH = 2000;
@@ -61,7 +62,7 @@ var KEY_L = 37;
 var KEY_R = 39;
 var KEY_ENTER = 13;
 var KEY_SPACE = 32;
-var KEY_SECONDARY = 90; // 'z'
+var KEY_SHIFT = 16;
 var KEY_ESCAPE = 27;
 
 
@@ -110,6 +111,10 @@ function moduloDiff(x0, x1, w) {
     if(diff < -w/2)return diff + w;
     else if(diff > w/2)return diff - w;
     else return diff;
+}
+
+function rotDiff(r0, r1) {
+    return moduloDiff(r0, r1, Math.PI * 2);
 }
 
 class Random {
@@ -442,9 +447,11 @@ class Field {
         for(var shot of this.shots) {
             for(var ship of this.ships) {
                 if(shot.ship && ship.isAlly(shot.ship)) continue;
+                if(ship.rock) continue;
                 if(shot.colliding(ship)) shot.hit(ship);
             }
             for(var rock of this.rocks) {
+                if(shot.ship && rock.mole && shot.ship === rock.mole) continue;
                 if(shot.colliding(rock)) shot.hit(rock);
             }
         }
@@ -458,6 +465,7 @@ class Field {
             }
             for(var ship of this.ships) {
                 if(rock.colliding(ship)) {
+                    if(ship.rock && ship.rock === rock) continue;
                     rock.handleCollision(ship);
                 }
             }
@@ -787,7 +795,7 @@ class Entity extends Sprite {
     constructor(field) {
         super(field);
 
-        this.hp = this.constructor.maxhp;
+        this.hp = this.maxhp = this.constructor.maxhp;
 
         this.rot = 0;
         this.rot_vel = 0;
@@ -862,10 +870,10 @@ class Entity extends Sprite {
             this.thrust(this.reverseSpeed, this.rot + Math.PI);
         }
         if(this.keys.l.wasDown) {
-            this.rot_vel += this.rotspeed;
+            this.turn(this.rotspeed);
         }
         if(this.keys.r.wasDown) {
-            this.rot_vel -= this.rotspeed;
+            this.turn(-this.rotspeed);
         }
         for(var keyname of this.SHOT_KEYNAMES) {
             var shotprops = this.shotprops[keyname];
@@ -873,6 +881,9 @@ class Entity extends Sprite {
                 this.fire(keyname);
             }
         }
+    }
+    turn(rot) {
+        this.rot_vel += rot;
     }
     thrust(speed, rot) {
         this.vel.addSpeed(speed, rot);
@@ -1262,6 +1273,20 @@ class Game {
         } else if(this.shouldRenderControls) {
             this.renderControls();
         }
+        if(this.camera.target) this.renderEntityStats(this.camera.target);
+    }
+    renderEntityStats(entity) {
+        var canvas = this.canvas;
+        var ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#fff';
+        ctx.textAlign = 'center';
+
+        var x = canvas.width / 2;
+        var y = canvas.height - 24;
+
+        var text = parseInt(entity.hp) + ' / ' + entity.maxhp;
+        ctx.font = 'normal bold 24px sans-serif';
+        ctx.fillText(text, x, y);
     }
     renderControls() {
         var canvas = this.canvas;
@@ -1281,7 +1306,7 @@ class Game {
             'Left/right: turn left/right',
             'Up/down   : thrust/reverse',
             'Spacebar  : space gun #1',
-            'Z         : space gun #2',
+            'Shift     : space gun #2',
             'Escape    : return to menu',
             'Enter     : show/hide controls',
         ];
@@ -1604,7 +1629,6 @@ class ScoutShip extends Ship {
 
             var shotprops = this.shotprops[keyname];
             shotprops.cooldown += 10;
-            shotprops.n_shots++;
         } else {
             super.fire(keyname);
         }
@@ -1773,8 +1797,7 @@ class FlagShip extends Ship {
             }
 
             var targetAngle = turret.pos.angle(this.pos, this.field.size);
-            turret.rot_vel += moduloDiff(
-                turret.rot, targetAngle, Math.PI * 2) * .2;
+            turret.rot_vel += rotDiff(turret.rot, targetAngle) * .2;
 
             var dist = this.pos.dist(turret.pos, this.field.size);
             var mindist = 45 * RADIUSMUL;
@@ -1792,6 +1815,126 @@ class FlagShip extends Ship {
                 this.addTurret();
             }
         }
+    }
+}
+
+class MoleShip extends Ship {
+    radius = 6 * RADIUSMUL;
+    thrustSpeed = 2.05;
+    reverseSpeed = 1.15;
+    velmul = .95;
+    rotspeed = Math.PI / 30;
+    rotmul = .7;
+
+    static maxhp = 60;
+
+    shotClass = {
+        x: DoubleShot,
+        y: null,
+    };
+
+    picture = new Picture([
+        new Shape([
+            new Point(-.7, -.3),
+            new Point(-.4, -.9),
+            new Point( .9, -.5),
+            new Point(-.1,   0),
+            new Point( .9,  .5),
+            new Point(-.4,  .9),
+            new Point(-.7,  .3),
+        ]),
+    ]);
+
+    rock = null;
+
+    remove() {
+        if(this.rock) this.exitRock();
+        super.remove();
+    }
+    step() {
+        var rock = this.rock;
+        if(rock) {
+            var fieldx = this.field.size.x;
+            var fieldy = this.field.size.y;
+
+            var dx = moduloDiff(this.pos.x, rock.pos.x, fieldx);
+            var dy = moduloDiff(this.pos.y, rock.pos.y, fieldy);
+
+            this.pos.x += dx * .2;
+            this.pos.y += dy * .2;
+            this.vel.x += dx * .1;
+            this.vel.y += dy * .1;
+
+            rock.rot_vel *= .95;
+            rock.vel.mul(this.velmul);
+        }
+        super.step();
+    }
+    fire(keyname) {
+        if(keyname === 'y') {
+            var shotprops = this.shotprops[keyname];
+            if(this.rock) {
+                this.pos.addSpeed(this.rock.radius * .8, this.rot);
+                this.vel.addSpeed(this.rock.radius * .2, this.rot);
+                this.exitRock();
+                shotprops.cooldown += 10;
+            } else {
+                var foundRock = null;
+                for(var rock of this.field.rocks) {
+                    if(!this.colliding(rock)) continue;
+                    if(rock.mole) continue;
+                    foundRock = rock;
+                    break;
+                }
+                if(foundRock) {
+                    this.enterRock(foundRock);
+                    shotprops.cooldown += 30;
+                }
+            }
+        } else {
+            super.fire(keyname);
+        }
+    }
+    shoot(cls, shot_i, serial_shot_i) {
+        var shot = super.shoot(cls, shot_i, serial_shot_i);
+
+        var rock = this.rock;
+        if(rock) {
+            shot.pos.addSpeed(rock.radius - this.radius, this.rot);
+        }
+
+        return shot;
+    }
+    thrust(speed, rot) {
+        var rock = this.rock;
+        if(rock) {
+            var mul = DEFAULT_ROCK_RADIUS / rock.radius;
+            if(mul > 1) mul = 1;
+            rock.vel.addSpeed(speed * mul, rot);
+        }
+        super.thrust(speed, rot);
+    }
+    turn(rot) {
+        var rock = this.rock;
+        if(rock) {
+            var mul = DEFAULT_ROCK_RADIUS / rock.radius;
+            if(mul > 1) mul = 1;
+            rock.rot_vel += rot * mul * .3;
+        }
+        super.turn(rot);
+    }
+    enterRock(rock) {
+        rock.mole = this;
+        this.rock = rock;
+        this.emitEffects(SparkEffect, 4, {
+            speed_min: 3,
+            speed_max: 6,
+            velmul: .65,
+        });
+    }
+    exitRock() {
+        this.rock.mole = null;
+        this.rock = null;
     }
 }
 
@@ -1862,11 +2005,17 @@ class SingleShot extends Shot {
 }
 
 class RapidSingleShot extends SingleShot {
+    static initialSpeed = 26;
     hitDamage = 6;
     static cooldown = 2;
     hitVelMul = .05;
     trailStrokeStyle = '#aaa';
     trailEnd = .3;
+}
+
+class RapidDoubleShot extends RapidSingleShot {
+    static serialShots = 2;
+    static serialRotVariance = Math.PI / 18;
 }
 
 class DoubleShot extends SingleShot {
@@ -1897,7 +2046,7 @@ class BlasterShot extends Shot {
     hitVelMul = .5;
     hitDamage = 20 * DAMAGEMUL;
 
-    maxAge = 14;
+    maxAge = 20;
     static cooldown = 32;
 
     picture = Picture.newPolygon(6);
@@ -1954,7 +2103,7 @@ class MissileShot extends Shot {
     }
     afterShotBy(entity) {
         super.afterShotBy(entity);
-        this.rot_vel = moduloDiff(this.rot, entity.rot, Math.PI * 2) * 2;
+        this.rot_vel = rotDiff(this.rot, entity.rot) * 2;
     }
     die() {
         this.emitEffects(SmokeEffect, 3, {
@@ -2042,16 +2191,16 @@ class Rock extends Entity {
     velmul = 1;
     rotmul = 1;
 
+    mole = null;
+
     constructor(field, radius) {
         super(field);
 
-        var default_radius = 10 * RADIUSMUL;
-
-        radius = radius || default_radius;
+        radius = radius || DEFAULT_ROCK_RADIUS;
         this.radius = radius;
 
         var default_hp = 50;
-        this.hp = default_hp * radius / default_radius;
+        this.hp = this.maxhp = default_hp * radius / DEFAULT_ROCK_RADIUS;
 
         var n_points = Random.randIntInclusive(5, 10);
         this.picture = Picture.newPolygon(n_points,
@@ -2063,6 +2212,10 @@ class Rock extends Entity {
         this.vel.setSpeed(speed, Random.randRotation());
 
         this.rot_vel = Random.randNumber(-.5, .5) * Math.PI / 40;
+    }
+    remove() {
+        if(this.mole) this.mole.exitRock();
+        super.remove();
     }
     die() {
         var min_radius = 9 * RADIUSMUL;
@@ -2144,6 +2297,7 @@ var SHIP_CLASSES = [
     TorchShip,
     TurretShip,
     FlagShip,
+    MoleShip,
 ];
 
 
@@ -2158,7 +2312,7 @@ game.mapKey(player.keys.d, KEY_D);
 game.mapKey(player.keys.l, KEY_L);
 game.mapKey(player.keys.r, KEY_R);
 game.mapKey(player.keys.x, KEY_SPACE);
-game.mapKey(player.keys.y, KEY_SECONDARY);
+game.mapKey(player.keys.y, KEY_SHIFT);
 
 game.setTitleMenu();
 
