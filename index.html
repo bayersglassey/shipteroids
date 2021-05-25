@@ -18,7 +18,7 @@ body {
 </head>
 <body>
 <div class="canvas-container">
-    <canvas id="canvas" class="canvas" width=800 height=800 tabindex=-1></canvas>
+    <canvas id="canvas" class="canvas" width=700 height=700 tabindex=-1></canvas>
 </div>
 <script>
 
@@ -47,6 +47,8 @@ var RADIUSMUL = 2;
 var DAMAGEMUL = 1.5;
 
 // Game/field default options
+var DEFAULT_FIELD_WIDTH = 2000;
+var DEFAULT_FIELD_HEIGHT = 2500;
 var DEFAULT_STARS_PER   =    5000;
 var DEFAULT_ROCKS_PER   =  300000;
 var DEFAULT_PLANETS_PER = 1000000;
@@ -292,13 +294,10 @@ class Field {
     The edges of the rectangle "wrap around" (or you can say it's a
     "torus" if you prefer). */
 
-    DEFAULT_WIDTH = 2500;
-    DEFAULT_HEIGHT = 3500;
-
     constructor(game, size) {
         size = size? size.clone(): new Point(
-            this.DEFAULT_WIDTH,
-            this.DEFAULT_HEIGHT,
+            DEFAULT_FIELD_WIDTH,
+            DEFAULT_FIELD_HEIGHT,
         );
 
         this.game = game;
@@ -1604,7 +1603,7 @@ class ScoutShip extends Ship {
             this._updateStats();
 
             var shotprops = this.shotprops[keyname];
-            shotprops.cooldown += 6;
+            shotprops.cooldown += 10;
             shotprops.n_shots++;
         } else {
             super.fire(keyname);
@@ -1613,14 +1612,14 @@ class ScoutShip extends Ship {
 }
 
 class AssaultShip extends Ship {
-    radius = 9 * RADIUSMUL;
+    radius = 12 * RADIUSMUL;
     thrustSpeed = 1.25;
     reverseSpeed = .5;
     velmul = .95;
     rotspeed = Math.PI / 34;
     rotmul = .65;
 
-    static maxhp = 175;
+    static maxhp = 200;
 
     shotClass = {
         x: TripleShot,
@@ -1639,19 +1638,20 @@ class AssaultShip extends Ship {
 
 class TorchShip extends Ship {
     radius = 6 * RADIUSMUL;
-    thrustSpeed = 1.25;
+    thrustSpeed = 1.45;
     reverseSpeed = 1;
     velmul = .95;
-    rotspeed = Math.PI / 40;
+    rotspeed = Math.PI / 30;
     rotmul = .7;
 
-    static maxhp = 90;
+    static maxhp = 110;
 
     shotClass = {
         x: FlameShot,
         y: MineShot,
     };
 
+    circleFillStyle = 'rgba(255,200,150,.35)';
     picture = new Picture([
         new Shape([
             new Point(-1.3,    0),
@@ -1785,10 +1785,10 @@ class FlagShip extends Ship {
                 turret.keys.d.down();
             }
         }
-        if(this.turret_cooldown) {
-            this.turret_cooldown--;
-        } else {
-            if(this.turrets.length < this.constructor.max_turrets) {
+        if(this.turrets.length < this.constructor.max_turrets) {
+            if(this.turret_cooldown) {
+                this.turret_cooldown--;
+            } else {
                 this.addTurret();
             }
         }
@@ -1890,7 +1890,7 @@ class QuadrupleShot extends SingleShot {
 }
 
 class BlasterShot extends Shot {
-    radius = 6 * RADIUSMUL;
+    radius = 8 * RADIUSMUL;
     static initialSpeed = 12;
     velmul = 1;
 
@@ -1903,6 +1903,11 @@ class BlasterShot extends Shot {
     picture = Picture.newPolygon(6);
 
     die() {
+        this.emitEffects(SmokeEffect, 3, {
+            speed_min: 3,
+            speed_max: 6,
+            velmul: .65,
+        });
         this.emitShots(SingleShot, 5, {
             rot_variance: Math.PI / 4,
             speed_min: 10,
@@ -1975,15 +1980,15 @@ class QuadrupleMissileShot extends MissileShot {
 }
 
 class FlameShot extends Shot {
-    static randomRotVariance = Math.PI / 15;
-    static randomPosRotVariance = Math.PI / 3;
+    static randomRotVariance = Math.PI / 12;
+    static randomPosRotVariance = Math.PI / 2;
     static randomSpeedVariance = 1.5;
 
-    static initialSpeed = 6;
+    static initialSpeed = 10;
     static initialVelMul = .8;
 
     hitVelMul = 0;
-    hitDamage = 4 * DAMAGEMUL;
+    hitDamage = 5 * DAMAGEMUL;
     hitDamageAgeMul = .9;
     hitEffectClass = FlameSmokeEffect;
 
