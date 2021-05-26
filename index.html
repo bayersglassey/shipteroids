@@ -54,6 +54,8 @@ var DEFAULT_STARS_PER    = 1 /    5000;
 var DEFAULT_ROCKS_PER    = 1 /  300000;
 var DEFAULT_PLANETS_PER  = 1 / 1000000;
 var DEFAULT_SHIPS_PER    = 1 /  500000;
+var DEFAULT_STAR_SPEED_MIN = 1.5;
+var DEFAULT_STAR_SPEED_MAX = 4.5;
 
 // keyCode values
 var KEY_U = 38;
@@ -177,6 +179,9 @@ class Point {
         this.y = y || 0;
         return this;
     }
+    area() {
+        return this.x * this.y;
+    }
     dist(other, modulo) {
         var x0 = this.x;
         var y0 = this.y;
@@ -292,6 +297,46 @@ class Point {
     }
 }
 
+class FieldTemplate {
+    /* Blueprint for creating a Field and populating it with entities (stars,
+    rocks, ships, etc). */
+
+    width_min = DEFAULT_FIELD_WIDTH;
+    width_max = DEFAULT_FIELD_WIDTH;
+    height_min = DEFAULT_FIELD_HEIGHT;
+    height_max = DEFAULT_FIELD_HEIGHT;
+
+    stars_per = DEFAULT_STARS_PER;
+    rocks_per = DEFAULT_ROCKS_PER;
+    planets_per = DEFAULT_PLANETS_PER;
+    ships_per = DEFAULT_SHIPS_PER;
+
+    star_speed_min = DEFAULT_STAR_SPEED_MIN;
+    star_speed_max = DEFAULT_STAR_SPEED_MAX;
+
+    ship_classes = SHIP_CLASSES;
+
+    constructor(props) {
+        if(props) for(var name in props) {
+            if(name in this) this[name] = props[name];
+        }
+    }
+    getWidth() {
+        return Random.randNumber(this.width_min, this.width_max);
+    }
+    getHeight() {
+        return Random.randNumber(this.height_min, this.height_max);
+    }
+    getSize() {
+        return new Point(this.getWidth(), this.getHeight());
+    }
+    getShipClass() {
+        return Random.choice(this.ship_classes);
+    }
+    getStarSpeed() {
+        return Random.randNumber(this.star_speed_min, this.star_speed_max);
+    }
+}
 
 class Field {
     /* Think of "field" in the sense of "playing field".
@@ -324,21 +369,16 @@ class Field {
         this.innerCanvas.width = size.x;
         this.innerCanvas.height = size.y;
     }
-    populate(opts) {
-        var stars_per   = getDefault(opts.stars_per,   DEFAULT_STARS_PER);
-        var rocks_per   = getDefault(opts.rocks_per,   DEFAULT_ROCKS_PER);
-        var planets_per = getDefault(opts.planets_per, DEFAULT_PLANETS_PER);
-        var ships_per   = getDefault(opts.ships_per,   DEFAULT_SHIPS_PER);
-
-        var area = this.size.x * this.size.y;
-        var n_stars = area * stars_per;
-        var n_rocks = area * rocks_per;
-        var n_planets = area * planets_per;
-        var n_ships = area * ships_per;
+    populate(template) {
+        var area = this.size.area();
+        var n_stars = area * template.stars_per;
+        var n_rocks = area * template.rocks_per;
+        var n_planets = area * template.planets_per;
+        var n_ships = area * template.ships_per;
 
         /* Add some random stars */
         var star_vel_rot = Random.randRotation();
-        var star_speed = Random.randNumber(1.5, 4.5);
+        var star_speed = template.getStarSpeed();
         for(var i = 0; i < n_stars; i++) {
             var star = new Star(this);
             this.stars.push(star);
@@ -580,7 +620,9 @@ class Shape {
 
     constructor(points, props) {
         this.points = points || [];
-        if(props) Object.assign(this, props);
+        if(props) for(var name in props) {
+            if(name in this) this[name] = props[name];
+        }
     }
     static newPolygon(n_points, opts, props) {
         opts = opts || {};
@@ -605,7 +647,9 @@ class Picture {
 
     constructor(shapes, props) {
         this.shapes = shapes || [];
-        if(props) Object.assign(this, props);
+        if(props) for(var name in props) {
+            if(name in this) this[name] = props[name];
+        }
     }
     static newPolygon(n_points, opts, props) {
         var shape = Shape.newPolygon(n_points, opts);
@@ -1164,9 +1208,7 @@ class CPUPlayer extends Player {
 }
 
 class Game {
-    constructor(canvas, opts) {
-        opts = opts || {};
-
+    constructor(canvas, template) {
         canvas.addEventListener('keydown', this.onKeyDown.bind(this));
         canvas.addEventListener('keyup', this.onKeyUp.bind(this));
 
@@ -1180,25 +1222,26 @@ class Game {
         Player instances in this.players */
         this.keysByCode = {};
 
-        this._newGame(opts);
+        this._newGame(template);
     }
-    _newGame(opts) {
+    _newGame(template) {
+        template = template || new FieldTemplate();
 
         this.cpus = [];
-        this.field = new Field(this);
+        this.field = new Field(this, template.getSize());
         this.camera = new Camera(this.field);
 
-        this.field.populate(opts);
+        this.field.populate(template);
 
-        // Save opts for use with this.reset()
-        this.opts = opts;
+        // Save template for use with this.reset()
+        this.template = template;
     }
-    newGame(opts) {
+    newGame(template) {
         this.cleanup();
-        this._newGame(opts);
+        this._newGame(template);
     }
     reset() {
-        this.newGame(this.opts);
+        this.newGame(this.template);
     }
     cleanup() {
         this.field.cleanup();
@@ -2010,7 +2053,7 @@ class Shot extends Entity {
 }
 
 class SingleShot extends Shot {
-    radius = .25 * RADIUSMUL;
+    radius = 3 * RADIUSMUL;
     velmul = .95;
     hitDamageAgeMul = .95;
     shouldRenderTrail = true;
@@ -2319,7 +2362,8 @@ var SHIP_CLASSES = [
 
 var canvas = document.getElementById('canvas');
 
-var game = new Game(canvas);
+var template = new FieldTemplate();
+var game = new Game(canvas, template);
 game.shouldRenderControls = !Boolean(PARAMS.get('nocontrols'));
 
 var player = game.addPlayer();
