@@ -48,12 +48,12 @@ var DAMAGEMUL = 1.5;
 var DEFAULT_ROCK_RADIUS = 10 * RADIUSMUL;
 
 // Game/field default options
-var DEFAULT_FIELD_WIDTH = 2000;
+var DEFAULT_FIELD_WIDTH  = 2000;
 var DEFAULT_FIELD_HEIGHT = 2500;
-var DEFAULT_STARS_PER   =    5000;
-var DEFAULT_ROCKS_PER   =  300000;
-var DEFAULT_PLANETS_PER = 1000000;
-var DEFAULT_SHIPS_PER   =  500000;
+var DEFAULT_STARS_PER    = 1 /    5000;
+var DEFAULT_ROCKS_PER    = 1 /  300000;
+var DEFAULT_PLANETS_PER  = 1 / 1000000;
+var DEFAULT_SHIPS_PER    = 1 /  500000;
 
 // keyCode values
 var KEY_U = 38;
@@ -331,10 +331,10 @@ class Field {
         var ships_per   = getDefault(opts.ships_per,   DEFAULT_SHIPS_PER);
 
         var area = this.size.x * this.size.y;
-        var n_stars = area / stars_per;
-        var n_rocks = area / rocks_per;
-        var n_planets = area / planets_per;
-        var n_ships = area / ships_per;
+        var n_stars = area * stars_per;
+        var n_rocks = area * rocks_per;
+        var n_planets = area * planets_per;
+        var n_ships = area * ships_per;
 
         /* Add some random stars */
         var star_vel_rot = Random.randRotation();
@@ -1589,7 +1589,7 @@ class ScoutShip extends Ship {
     };
 
     shotClassWingsIn = {
-        x: RapidSingleShot,
+        x: RapidDoubleShot,
         y: null,
     };
 
@@ -2029,7 +2029,7 @@ class RapidSingleShot extends SingleShot {
 
 class RapidDoubleShot extends RapidSingleShot {
     static serialShots = 2;
-    static serialRotVariance = Math.PI / 18;
+    static serialPosRotVariance = Math.PI / 2;
 }
 
 class DoubleShot extends SingleShot {
