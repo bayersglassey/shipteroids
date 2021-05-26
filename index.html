@@ -46,6 +46,7 @@ var ROTVELMUL = .5;
 var RADIUSMUL = 2;
 var DAMAGEMUL = 1.5;
 var DEFAULT_ROCK_RADIUS = 10 * RADIUSMUL;
+var WARP_RADIUS = 10 * RADIUSMUL;
 
 // Game/field default options
 var DEFAULT_FIELD_WIDTH  = 1000;
@@ -117,6 +118,19 @@ function moduloDiff(x0, x1, w) {
 
 function rotDiff(r0, r1) {
     return moduloDiff(r0, r1, Math.PI * 2);
+}
+
+function renderCircle(ctx, x0, y0, rot, radius) {
+    ctx.save();
+    {
+        ctx.translate(x0, y0);
+        ctx.rotate(rot);
+        ctx.beginPath();
+        ctx.arc(0, 0, radius, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.fill();
+    }
+    ctx.restore();
 }
 
 class Text {
@@ -365,33 +379,44 @@ class FieldTemplate {
     }
 }
 
-class MapNode {
+class MapDestination {
+    /* Somewhere you can be on a Map.
+    To be more precise, every MapProgress has an associated MapDestination,
+    which is either a MapNode or a MapEdge. */
+
+    constructor(map, template) {
+        this.map = map;
+        this.template = template;
+    }
+}
+
+class MapNode extends MapDestination {
     /* A node of the graph represented by class Map. */
 
     constructor(map, template, text) {
-        this.map = map;
-        this.template = template || new FieldTemplate();
+        super(map, template);
         this.text = text || null;
         this.edges = [];
     }
     addEdge(other, len, template) {
-        var edge = new MapEdge(this, other, len, template);
+        template = template || this.template;
+        var edge = new MapEdge(this.map, template, this, other, len);
         this.edges.push(edge);
         return edge;
     }
 }
 
-class MapEdge {
+class MapEdge extends MapDestination {
     /* Connects one MapNode (this.node0) to another (this.node1).
     Has a length (this.len), an integer representing the number of
     warps you need to make in order to travel from this.node0 to
     this.node0. */
 
-    constructor(node0, node1, len, template) {
+    constructor(map, template, node0, node1, len) {
+        super(map, template);
         this.node0 = node0;
         this.node1 = node1;
         this.len = getDefault(len, 0);
-        this.template = template || node0.template;
     }
 }
 
@@ -432,9 +457,8 @@ class MapProgress {
         this.setNode(map.startNode || map.nodes[0]);
         if(map.startEdge) this.setEdge(map.startEdge);
     }
-    getTemplate() {
-        if(this.edge) return this.edge.template;
-        return this.node.template;
+    getDestination() {
+        return this.edge? this.edge: this.node;
     }
     getText() {
         if(this.edge) return null;
@@ -474,10 +498,9 @@ class Field {
     The edges of the rectangle "wrap around" (or you can say it's a
     "torus" if you prefer). */
 
-    constructor(game, size, text) {
+    constructor(game, size) {
         this.game = game;
         this.size = size;
-        this.text = text || null;
 
         this.stars = [];
 
@@ -884,17 +907,7 @@ class Sprite extends Particle {
         ctx.strokeStyle = this.circleStrokeStyle;
         ctx.lineWidth = this.circleLineWidth;
         ctx.fillStyle = this.circleFillStyle;
-
-        ctx.save();
-        ctx.translate(x0, y0);
-        ctx.rotate(this.rot);
-        {
-            ctx.beginPath();
-            ctx.arc(0, 0, this.radius, 0, Math.PI * 2);
-            ctx.stroke();
-            ctx.fill();
-        }
-        ctx.restore();
+        renderCircle(ctx, x0, y0, this.rot, this.radius);
     }
 }
 
@@ -1333,6 +1346,20 @@ class CPUPlayer extends Player {
     }
 }
 
+class Warp {
+    /* Represents a warp point. If a player flies very fast towards
+    this, they will "warp" towards the associated MapNode or MapEdge. */
+
+    constructor(game, destination, rot) {
+        this.game = game;
+
+        // destination: MapNode or MapEdge
+        this.destination = destination;
+
+        this.rot = rot;
+    }
+}
+
 class Game {
 
     constructor(canvas, progress) {
@@ -1343,6 +1370,8 @@ class Game {
         this.intervalId = 0;
         this.players = [];
         this.menu = null;
+
+        this.warpGradient = this.createWarpGradient();
 
         /* Hashmap from keyCode values to Key instances belonging to
         Player instances in this.players */
@@ -1357,17 +1386,70 @@ class Game {
         // NOTE: need to set this.cpus before calling the Field constructor
         this.cpus = [];
 
-        var template = this.progress.getTemplate();
-        var text = this.progress.getText();
+        this.warps = this.createWarps();
+
+        // destination: MapNode or MapEdge
+        var destination = this.progress.getDestination();
+        var template = destination.template;
         var size = template.getSize();
 
         // NOTE: field.populate needs to be a separate method from
         // field.constructor, so that field.populate can rely on
         // field.game.field being set.
-        this.field = new Field(this, size, text);
+        this.field = new Field(this, size);
         this.field.populate(template);
 
         this.camera = new Camera(this.field);
+    }
+    createWarpGradient() {
+        var ctx = this.canvas.getContext('2d');
+        var gradient = ctx.createRadialGradient(
+            // x0, y0, r0
+            0, 0, 0,
+            // x1, y1, r1
+            0, 0, WARP_RADIUS);
+
+        gradient.addColorStop(.5, 'rgba(30,200,255,.4)');
+        gradient.addColorStop(1,  'rgba(30,200,255,0)');
+        return gradient;
+    }
+    createWarps() {
+        // destination: MapNode or MapEdge
+        var destination = this.progress.getDestination();
+
+        var addrot = Random.randRotation();
+
+        var warps = [];
+        var n_warps = destination instanceof MapNode?
+            destination.edges.length: 1;
+        for(var i = 0; i < n_warps; i++) {
+            var i2 = i + Random.randNumber(-.5, .5) * .7;
+            var rot = (i2 / n_warps) * Math.PI * 2 + addrot;
+            var warp = new Warp(this, destination, rot);
+            warps.push(warp);
+        }
+        return warps;
+    }
+    renderWarps() {
+        var canvas = this.canvas;
+        var ctx = canvas.getContext('2d');
+
+        ctx.strokeStyle = 'transparent';
+        ctx.fillStyle = this.warpGradient;
+
+        var radius = 10 * RADIUSMUL;
+        var posradius = Math.min(canvas.width, canvas.height) / 2;
+
+        var p = new Point();
+
+        for(var warp of this.warps) {
+            p.set().addSpeed(posradius, warp.rot);
+
+            var x0 = canvas.width / 2 + p.x;
+            var y0 = canvas.height / 2 + p.y;
+
+            renderCircle(ctx, x0, y0, warp.rot, radius);
+        }
     }
     warp() {
         /* Warp to the next Field */
@@ -1449,8 +1531,10 @@ class Game {
         this.field.render(canvas, this.camera);
         if(this.menu) {
             this.menu.render();
-        } else if(this.field.text) {
-            this.field.text.render(canvas);
+        } else {
+            this.renderWarps();
+            var text = this.progress.getDestination().text;
+            if(text) text.render(canvas);
         }
         if(this.camera.target) this.renderEntityStats(this.camera.target);
     }
@@ -2459,9 +2543,9 @@ var defaultMap = (function() {
         new Text('Controls', [
             'Left/right: turn left/right',
             'Up/down   : thrust/reverse',
-            'Spacebar  : space gun #1',
-            'Shift     : space gun #2',
-            'Escape    : return to menu',
+            'Spacebar  : fire weapon / use ability #1',
+            'Shift     : fire weapon / use ability #2',
+            'Escape    : open menu',
         ]),
     );
 
