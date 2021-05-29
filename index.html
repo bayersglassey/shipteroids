@@ -1539,9 +1539,23 @@ class Game {
         for(var player of this.cpus) player.step();
 
         this.field.step();
-
+        this.stepWarps();
         this.camera.step();
         this.camera.stepPhysics();
+    }
+    stepWarps() {
+        var MAX_DIFF = 10;
+        for(var warp of this.warps) {
+            var max_d = 0;
+            for(var player of this.players) {
+                var entity = player.entity;
+                if(!entity) continue;
+                var d = rotDiff(entity.rot, warp.rot);
+                if(d < MAX_DIFF) {
+                    // TODO: ???
+                }
+            }
+        }
     }
     render() {
         var canvas = this.canvas;
