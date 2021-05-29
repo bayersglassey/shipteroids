@@ -628,7 +628,6 @@ class Field {
             this.addPendingEntities(entityArray);
         }
 
-        for(var star of this.stars) star.step();
         for(var entityArray of this.entityArrays) {
             for(var entity of entityArray) entity.step();
         }
@@ -680,6 +679,11 @@ class Field {
 
         for(var entityArray of this.entityArrays) {
             this.removeEntities(entityArray);
+        }
+
+        for(var star of this.stars) star.stepPhysics();
+        for(var entityArray of this.entityArrays) {
+            for(var entity of entityArray) entity.stepPhysics();
         }
     }
     removeEntities(entityArray) {
@@ -750,7 +754,7 @@ class Particle {
         this.pos = new Point();
         this.vel = new Point();
     }
-    step() {
+    stepPhysics() {
         // Make sure velocity stays within this.maxvel
         var veldist = this.vel.dist();
         if(veldist > this.maxvel) this.vel.mul(this.maxvel / veldist);
@@ -983,6 +987,15 @@ class Entity extends Sprite {
 
         this.hp = this.maxhp = this.constructor.maxhp;
 
+        // addpos: entities can add to each others' addpos during step(),
+        // and then addpos is added to pos during stepPhysics().
+        // The purpose of this is to avoid modifying pos during step(),
+        // because it's used in many calculations, so if it's modified
+        // then the interactions between entities would be subtly different
+        // depending on the order in which entities' step() is called...
+        // Hope you get what I mean.
+        this.addpos = new Point();
+
         this.rot = 0;
         this.rot_vel = 0;
 
@@ -1026,9 +1039,6 @@ class Entity extends Sprite {
         }
     }
     step() {
-        this.vel.mul(this.velmul);
-        this.rot_vel *= this.rotmul;
-
         for(var keyname of this.SHOT_KEYNAMES) {
             var shotprops = this.shotprops[keyname];
             if(shotprops.cooldown > 0) shotprops.cooldown--;
@@ -1044,13 +1054,21 @@ class Entity extends Sprite {
             if((this.hp += this.addhp) > this.maxhp) this.hp = this.maxhp;
         }
 
-        super.step();
-        this.rot += this.rot_vel * ROTVELMUL;
-
         this.age++;
         if(this.maxAge >= 0 && this.age >= this.maxAge) {
             this.die();
         }
+    }
+    stepPhysics() {
+        this.vel.mul(this.velmul);
+        this.rot += this.rot_vel * ROTVELMUL;
+        this.rot_vel *= this.rotmul;
+
+        super.stepPhysics();
+
+        // Add addpos to pos, then reset addpos
+        this.pos.add(this.addpos);
+        this.addpos.set();
     }
     handleKeys() {
         if(this.keys.u.wasDown) {
@@ -1220,10 +1238,10 @@ class Entity extends Sprite {
         var my = dy / dist * (dist - tdist);
 
         var posmul = .25;
-        this.pos.x  += mx * r1 * posmul;
-        this.pos.y  += my * r1 * posmul;
-        other.pos.x -= mx * r0 * posmul;
-        other.pos.y -= my * r0 * posmul;
+        this.addpos.x  += mx * r1 * posmul;
+        this.addpos.y  += my * r1 * posmul;
+        other.addpos.x -= mx * r0 * posmul;
+        other.addpos.y -= my * r0 * posmul;
 
         var velmul = .35;
         this.vel.x  += mx * r1 * velmul;
@@ -1300,8 +1318,6 @@ class Camera extends Particle {
             this.vel.y += moduloDiff(y0, y1, this.field.size.y)
                 * this.springmul;
         }
-
-        super.step();
     }
 }
 
@@ -1521,8 +1537,11 @@ class Game {
     step() {
         for(var player of this.players) player.step();
         for(var player of this.cpus) player.step();
+
         this.field.step();
+
         this.camera.step();
+        this.camera.stepPhysics();
     }
     render() {
         var canvas = this.canvas;
@@ -2090,8 +2109,8 @@ class MoleShip extends Ship {
             var dx = moduloDiff(this.pos.x, rock.pos.x, fieldx);
             var dy = moduloDiff(this.pos.y, rock.pos.y, fieldy);
 
-            this.pos.x += dx * .2;
-            this.pos.y += dy * .2;
+            this.addpos.x += dx * .2;
+            this.addpos.y += dy * .2;
             this.vel.x += dx * .1;
             this.vel.y += dy * .1;
 
@@ -2104,7 +2123,7 @@ class MoleShip extends Ship {
         if(keyname === 'y') {
             var shotprops = this.shotprops[keyname];
             if(this.rock) {
-                this.pos.addSpeed(this.rock.radius * .8, this.rot);
+                this.addpos.addSpeed(this.rock.radius * .8, this.rot);
                 this.vel.addSpeed(this.rock.radius * .2, this.rot);
                 this.exitRock();
                 shotprops.cooldown += 10;
@@ -2130,7 +2149,7 @@ class MoleShip extends Ship {
 
         var rock = this.rock;
         if(rock) {
-            shot.pos.addSpeed(rock.radius - this.radius, this.rot);
+            shot.addpos.addSpeed(rock.radius - this.radius, this.rot);
         }
 
         return shot;
