@@ -24,6 +24,9 @@ body {
 
 'use strict';
 
+// an empty Object (do not modify!!)
+var EMPTY = {};
+
 
 // query params
 var PARAMS = new URLSearchParams(window.location.search);
@@ -44,7 +47,7 @@ var RENDER_BOUNDARY = getBoolParam('render_boundary');
 var VELMUL = .7;
 var ROTVELMUL = .5;
 var RADIUSMUL = 2;
-var DAMAGEMUL = 1.5;
+var DAMAGEMUL = 1;
 var DEFAULT_ROCK_RADIUS = 10 * RADIUSMUL;
 var WARP_RADIUS = 10 * RADIUSMUL;
 
@@ -653,7 +656,11 @@ class Field {
             }
             for(var ship of this.ships) {
                 if(rock.colliding(ship)) {
-                    if(ship.rock && ship.rock === rock) continue;
+                    if(ship.rock === rock) continue;
+                    if(ship.rockPullTo || ship.rockPullOn) {
+                        ship.magneticField(rock,
+                            ship.rockPullTo, ship.rockPullOn);
+                    }
                     rock.handleCollision(ship);
                 }
             }
@@ -662,6 +669,11 @@ class Field {
         for(var ship of this.ships) {
             for(var other of this.ships) {
                 if(ship === other) continue;
+                var pullTo = ship.shipPullTo + other.shipPullOn;
+                var pullOn = ship.shipPullOn + other.shipPullTo;
+                if(pullTo || pullOn) {
+                    ship.magneticField(other, pullTo, pullOn);
+                }
                 if(ship.colliding(other)) {
                     ship.handleCollision(other);
                 }
@@ -778,7 +790,7 @@ class Shape {
         }
     }
     static newPolygon(n_points, opts, props) {
-        opts = opts || {};
+        opts = opts || EMPTY;
         var rotVariance = getDefault(opts.rotVariance, 0);
         var radiusVariance = getDefault(opts.radiusVariance, 0);
         var rot = getDefault(opts.rot, 0);
@@ -792,6 +804,18 @@ class Shape {
             points.push(point);
         }
         return new this(points, props);
+    }
+    add(other_point) {
+        for(var point of this.points) point.add(other_point);
+        return this;
+    }
+    addxy(x, y) {
+        for(var point of this.points) point.addxy(x, y);
+        return this;
+    }
+    mul(n) {
+        for(var point of this.points) point.mul(n);
+        return this;
     }
 }
 
@@ -974,7 +998,10 @@ class Entity extends Sprite {
 
     thrustEffectClass = ThrustEffect;
     thrustEffectSpeedMul = 2;
+    thrustEffectVelMul = 1;
     thrustEffectEvery = 3;
+
+    // Set to thrustEffectEvery each time a thrust Effect is created
     thrustEffectCooldown = 0;
 
     static maxhp = -1;
@@ -1014,7 +1041,9 @@ class Entity extends Sprite {
     }
     damage(hp) {
         if(this.hp < 0) return;
-        if((this.hp -= hp) < 0) this.hp = 0;
+
+        this.hp -= hp * DAMAGEMUL;
+        if(this.hp < 0) this.hp = 0;
         if(!this.hp) {
             this.die();
         }
@@ -1096,17 +1125,20 @@ class Entity extends Sprite {
     thrust(speed, rot) {
         this.vel.addSpeed(speed, rot);
         if(this.thrustEffectCooldown === 0) {
-            this.addThrustEffect(
-                speed * this.thrustEffectSpeedMul,
-                rot + Math.PI);
+            if(this.thrustEffectClass) {
+                this.addThrustEffect(speed, rot + Math.PI);
+            }
             this.thrustEffectCooldown += this.thrustEffectEvery;
         }
     }
     addThrustEffect(speed, rot) {
         var effect = this.field.addEffect(this.thrustEffectClass);
         effect.pos.copy(this.pos).addSpeed(this.radius, rot);
-        effect.vel.copy(this.vel).addSpeed(speed, rot);
+        effect.vel.copy(this.vel)
+            .mul(this.thrustEffectVelMul)
+            .addSpeed(speed * this.thrustEffectSpeedMul, rot);
         effect.rot = rot;
+        return effect;
     }
     emitEffects(cls, n_effects, opts) {
         var speed_min = getDefault(opts.speed_min, 0);
@@ -1205,13 +1237,6 @@ class Entity extends Sprite {
         We are both pushed away, and take on some of each others
         velocity. */
 
-        /* Store the two entities' velocities before we make any
-        changes to them. */
-        var vx0 = this.vel.x;
-        var vy0 = this.vel.y;
-        var vx1 = other.vel.x;
-        var vy1 = other.vel.y;
-
         /* r0: number between 0 and 1.
         The closer it is to 1, the larger this.radius is than other.radius.
         If .5, they are equal. */
@@ -1248,6 +1273,40 @@ class Entity extends Sprite {
         this.vel.y  += my * r1 * velmul;
         other.vel.x -= mx * r0 * velmul;
         other.vel.y -= my * r0 * velmul;
+    }
+    magneticField(other, pullTo, pullOn, opts) {
+        opts = opts || EMPTY;
+        pullTo = getDefault(pullTo, 1);
+        pullOn = getDefault(pullOn, 1);
+        var distmul = getDefault(opts.distmul, 1);
+        var velmul = getDefault(opts.velmul, 9);
+
+        /* r0: number between 0 and 1.
+        The closer it is to 1, the larger this.radius is than other.radius.
+        If .5, they are equal. */
+        var r0 = this.radius / (this.radius + other.radius);
+        var r1 = 1 - r0;
+
+        /* Distance between this and other */
+        var dist = this.pos.dist(other.pos, this.field.size);
+
+        /* Avoid div by zero, eh */
+        if(dist < .1) dist = .1;
+
+        /* dx, dy: shortest vector from this to other, on the torus
+        represented by this.field.size */
+        var dx = moduloDiff(this.pos.x, other.pos.x, this.field.size.x);
+        var dy = moduloDiff(this.pos.y, other.pos.y, this.field.size.y);
+
+        /* mx, my: vector which moves this towards other */
+        var m = Math.pow(dist * distmul, 2);
+        var mx = dx * velmul / m;
+        var my = dy * velmul / m;
+
+        this.vel.x  += mx * r1 * pullTo;
+        this.vel.y  += my * r1 * pullTo;
+        other.vel.x -= mx * r0 * pullOn;
+        other.vel.y -= my * r0 * pullOn;
     }
     render(canvas, camera) {
         var fade = 1;
@@ -1769,6 +1828,10 @@ class ThrustEffect extends Effect {
     maxAge = 20;
 }
 
+class SmokeThrustEffect extends SmokeEffect {
+    radius = 3 * RADIUSMUL;
+}
+
 class SparkEffect extends Effect {
     radius = 3 * RADIUSMUL;
     shouldRenderTrail = true;
@@ -1780,6 +1843,12 @@ class SparkEffect extends Effect {
 
 class Ship extends Entity {
     static maxhp = 100;
+
+    shipPullTo = 0;
+    shipPullOn = 0;
+
+    rockPullTo = 0;
+    rockPullOn = 0;
 
     die() {
         this.emitEffects(SmokeEffect, 4, {
@@ -1937,6 +2006,10 @@ class TorchShip extends Ship {
         x: FlameShot,
         y: MineShot,
     };
+
+    thrustEffectClass = SmokeThrustEffect;
+    thrustEffectVelMul = .2;
+    thrustEffectEvery = 3;
 
     circleFillStyle = 'rgba(255,200,150,.35)';
     picture = new Picture([
@@ -2201,6 +2274,29 @@ class MoleShip extends Ship {
     }
 }
 
+class EngineerShip extends Ship {
+    radius = 6 * RADIUSMUL;
+    thrustSpeed = 1.15;
+    reverseSpeed = .8;
+    velmul = .9;
+    rotspeed = Math.PI / 50;
+    rotmul = .85;
+
+    static maxhp = 60;
+
+    thrustEffectClass = null;
+
+    shotClass = {
+        x: DoubleShot,
+        y: null,
+    };
+
+    picture = new Picture([
+        Shape.newPolygon(5).addxy(-.3, 0).mul(.9),
+        Shape.newPolygon(4).addxy(1.2, 0).mul(.5),
+    ]);
+}
+
 class Shot extends Entity {
 
     static initialShots = 1;
@@ -2222,7 +2318,7 @@ class Shot extends Entity {
     hitVelMul = .1;
 
     // How much damage we do
-    hitDamage = 10 * DAMAGEMUL;
+    hitDamage = 10;
 
     // If < 1, the amount of damage we do goes down over time
     hitDamageAgeMul = 1;
@@ -2308,7 +2404,7 @@ class BlasterShot extends Shot {
     velmul = 1;
 
     hitVelMul = .5;
-    hitDamage = 15 * DAMAGEMUL;
+    hitDamage = 15;
 
     maxAge = 20;
     static cooldown = 32;
@@ -2339,7 +2435,7 @@ class MissileShot extends Shot {
     thrustSpeed = 3;
 
     hitVelMul = .45;
-    hitDamage = 10 * DAMAGEMUL;
+    hitDamage = 10;
 
     maxAge = 30;
     fadeWithAge = false;
@@ -2394,20 +2490,20 @@ class QuadrupleMissileShot extends MissileShot {
 
 class FlameShot extends Shot {
     static randomRotVariance = Math.PI / 12;
-    static randomPosRotVariance = Math.PI / 2;
+    static randomPosRotVariance = Math.PI / 4;
     static randomSpeedVariance = 1.5;
 
     static initialSpeed = 10;
     static initialVelMul = .8;
 
     hitVelMul = 0;
-    hitDamage = 5 * DAMAGEMUL;
+    hitDamage = 5;
     hitDamageAgeMul = .9;
     hitEffectClass = FlameSmokeEffect;
 
     static cooldown = 1;
 
-    radius = 5 * RADIUSMUL;
+    radius = 3 * RADIUSMUL;
     velmul = .95;
     maxAge = 25;
     fadeWithAge = true;
@@ -2422,6 +2518,10 @@ class FlameShot extends Shot {
         super(field);
         this.rot_vel = Random.randNumber(-.5, .5) * Math.PI / 40;
     }
+    step() {
+        super.step();
+        this.radius += .2 * RADIUSMUL;
+    }
 }
 
 class MineShot extends Shot {
@@ -2429,7 +2529,7 @@ class MineShot extends Shot {
     static initialSpeed = 0;
     velmul = .9;
 
-    hitDamage = 15 * DAMAGEMUL;
+    hitDamage = 15;
 
     maxAge = 300;
     static cooldown = 32;
@@ -2563,6 +2663,7 @@ var SHIP_CLASSES = [
     TurretShip,
     FlagShip,
     MoleShip,
+    //EngineerShip,
 ];
 
 
