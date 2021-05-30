@@ -26,12 +26,17 @@ body {
 
 
 /******************************
-* IDEAS / TODO:
+* IDEAS:
 *
 * Chomper ship (light tractor beam at short distances, using Entity.magneticField
 * Rammer ship
 * Really big ship (MotherShip) with "gravity" using Entity.magneticField
 * Hunter ship?.. BlasterShot + "wormhole" ability?..
+*
+* TODO:
+*
+* When a player loses their ship, reset players' keys (otherwise e.g. they can
+* still be holding Up while you're in the menu choosing ships)
 *
 ******************************/
 
@@ -2388,6 +2393,51 @@ class EngineerShip extends Ship {
     ]);
 }
 
+class ChomperShip extends Ship {
+    radius = 10 * RADIUSMUL;
+
+    velmul = .9;
+
+    static maxhp = 150;
+
+    shotClass = {
+        x: ChompShot,
+        y: null,
+    };
+
+    picture = new Picture([
+        new Shape([
+            // Body
+            new Point(-.8, -.7),
+            new Point(  0,   0),
+            new Point(-.8,  .7),
+        ]),
+        new Shape([
+            // Left arm
+            new Point(  0, -.4),
+            new Point( .2, -.9),
+            new Point(  1, -.4),
+        ]),
+        new Shape([
+            // Right arm
+            new Point(  0,  .4),
+            new Point( .2,  .9),
+            new Point(  1,  .4),
+        ]),
+    ]);
+
+    fire(keyname) {
+        if(keyname === 'y') {
+            this.thrust(this.thrustSpeed * 25, this.rot);
+
+            var shotprops = this.shotprops[keyname];
+            shotprops.cooldown += 32;
+        } else {
+            super.fire(keyname);
+        }
+    }
+}
+
 class Shot extends Entity {
 
     static initialShots = 1;
@@ -2640,6 +2690,36 @@ class MineShot extends Shot {
     }
 }
 
+class ChompShot extends Shot {
+    radius = 14 * RADIUSMUL;
+    static initialSpeed = 18;
+    static initialVelMul = .75;
+    velmul = .9;
+
+    hitVelMul = .4;
+    hitDamage = 25;
+
+    maxAge = 4;
+    static cooldown = 16;
+
+    picture = new Picture([
+        new Shape([
+            new Point(-.4, -.85),
+            new Point( .9,    0),
+            new Point(-.4,  .85),
+        ], {fill: false, close: false}),
+    ]);
+
+    die() {
+        this.emitEffects(SparkEffect, 5, {
+            speed_min: 3,
+            speed_max: 6,
+            velmul: .65,
+        });
+        super.die();
+    }
+}
+
 class Rock extends Entity {
 
     circleStrokeStyle = '#987';
@@ -2654,7 +2734,7 @@ class Rock extends Entity {
         radius = getDefault(radius, DEFAULT_ROCK_RADIUS);
         this.radius = radius;
 
-        var default_hp = 50;
+        var default_hp = 30;
         this.hp = this.maxhp = parseInt(
             default_hp * radius / DEFAULT_ROCK_RADIUS);
 
@@ -2683,9 +2763,12 @@ class Rock extends Entity {
                 var rock = this.field.addRock(
                     this.constructor, this.radius * .65);
                 var posrot = (i / n_rocks) * Math.PI * 2 + addposrot;
+                var posradius = this.radius;
+                var radiusvelmul = .1;
                 rock.pos.copy(this.pos)
-                    .addSpeed(this.radius, addposrot);
-                rock.vel.addMul(this.vel, velmul);
+                    .addSpeed(posradius, posrot);
+                rock.vel.addMul(this.vel, velmul)
+                    .addSpeed(posradius * radiusvelmul, posrot);
             }
         }
         this.emitEffects(SmokeEffect, 3, {
@@ -2755,6 +2838,7 @@ var SHIP_CLASSES = [
     FlagShip,
     MoleShip,
     //EngineerShip,
+    ChomperShip,
 ];
 
 
