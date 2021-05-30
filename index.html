@@ -54,6 +54,9 @@ function getBoolParam(name) {
 var TIMING = getBoolParam('timing');
 var RENDER_CIRCLES = getBoolParam('render_circles');
 var RENDER_BOUNDARY = getBoolParam('render_boundary');
+var HIDE_TEXT = getBoolParam('hide_text');
+var NODAMAGE = getBoolParam('nodamage');
+var MAGNETIC_FIELD = getBoolParam('magnetic_field');
 
 // physics tweaking stuff
 var VELMUL = .7;
@@ -1073,6 +1076,8 @@ class Entity extends Sprite {
     damage(hp) {
         if(this.hp < 0) return;
 
+        if(this instanceof Ship && NODAMAGE) return;
+
         this.hp -= hp * DAMAGEMUL;
         if(this.hp < 0) this.hp = 0;
         if(!this.hp) {
@@ -1711,7 +1716,7 @@ class Game {
         } else {
             this.renderWarps();
             var text = this.progress.getDestination().text;
-            if(text) text.render(canvas);
+            if(text && !HIDE_TEXT) text.render(canvas);
         }
         if(this.camera.target) this.renderEntityStats(this.camera.target);
     }
@@ -1930,8 +1935,8 @@ class SparkEffect extends Effect {
 class Ship extends Entity {
     static maxhp = 100;
 
-    shipPullTo = 0;
-    shipPullOn = 0;
+    shipPullTo = MAGNETIC_FIELD? 1: 0;
+    shipPullOn = MAGNETIC_FIELD? 1: 0;
 
     rockPullTo = 0;
     rockPullOn = 0;
