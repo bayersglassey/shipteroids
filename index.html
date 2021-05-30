@@ -50,6 +50,7 @@ var RADIUSMUL = 2;
 var DAMAGEMUL = 1;
 var DEFAULT_ROCK_RADIUS = 10 * RADIUSMUL;
 var WARP_RADIUS = 10 * RADIUSMUL;
+var WARP_AFTER_STEPS = 30;
 
 // Game/field default options
 var DEFAULT_FIELD_WIDTH  = 1000;
@@ -70,6 +71,7 @@ var KEY_ENTER = 13;
 var KEY_SPACE = 32;
 var KEY_SHIFT = 16;
 var KEY_ESCAPE = 27;
+var KEY_WARP = 87; // 'W'
 
 
 function linear(x0, x1, n) {
@@ -640,18 +642,25 @@ class Field {
                 if(shot.ship && ship.isAlly(shot.ship)) continue;
                 if(ship.rock) continue;
                 if(shot.colliding(ship)) shot.hit(ship);
+                // Don't bother calling handleCollision() with Shots
+                // (We might want to in future, though...)
             }
             for(var rock of this.rocks) {
                 if(shot.ship && rock.mole && shot.ship === rock.mole) continue;
                 if(shot.colliding(rock)) shot.hit(rock);
+                // Don't bother calling handleCollision() with Shots
+                // (We might want to in future, though...)
             }
         }
 
-        for(var rock of this.rocks) {
-            for(var other of this.rocks) {
-                if(rock === other) continue;
+        for(var i = 0; i < this.rocks.length; i++) {
+            var rock = this.rocks[i];
+            for(var j = i + 1; j < this.rocks.length; j++) {
+                var other = this.rocks[j];
                 if(rock.colliding(other)) {
                     rock.handleCollision(other);
+                    other.handleCollision(rock);
+                    rock.handleCollisionPhysics(other);
                 }
             }
             for(var ship of this.ships) {
@@ -662,13 +671,16 @@ class Field {
                             ship.rockPullTo, ship.rockPullOn);
                     }
                     rock.handleCollision(ship);
+                    ship.handleCollision(rock);
+                    rock.handleCollisionPhysics(ship);
                 }
             }
         }
 
-        for(var ship of this.ships) {
-            for(var other of this.ships) {
-                if(ship === other) continue;
+        for(var i = 0; i < this.ships.length; i++) {
+            var ship = this.ships[i];
+            for(var j = i + 1; j < this.ships.length; j++) {
+                var other = this.ships[j];
                 var pullTo = ship.shipPullTo + other.shipPullOn;
                 var pullOn = ship.shipPullOn + other.shipPullTo;
                 if(pullTo || pullOn) {
@@ -676,15 +688,19 @@ class Field {
                 }
                 if(ship.colliding(other)) {
                     ship.handleCollision(other);
+                    other.handleCollision(ship);
+                    ship.handleCollisionPhysics(other);
                 }
             }
         }
 
-        for(var planet of this.planets) {
-            for(var other of this.planets) {
-                if(planet === other) continue;
+        for(var i = 0; i < this.planets.length; i++) {
+            var planet = this.planets[i];
+            for(var j = i + 1; j < this.planets.length; j++) {
+                var other = this.planets[j];
                 if(planet.colliding(other)) {
-                    planet.handleCollision(other);
+                    planet.handleCollisionPhysics(other);
+                    // Don't bother calling handleCollision() with Planets
                 }
             }
         }
@@ -1004,6 +1020,9 @@ class Entity extends Sprite {
     // Set to thrustEffectEvery each time a thrust Effect is created
     thrustEffectCooldown = 0;
 
+    is_warping = false;
+    warping_counter = 0;
+
     static maxhp = -1;
 
     addhp = 1;
@@ -1072,7 +1091,18 @@ class Entity extends Sprite {
             var shotprops = this.shotprops[keyname];
             if(shotprops.cooldown > 0) shotprops.cooldown--;
         }
+
         if(this.thrustEffectCooldown > 0) this.thrustEffectCooldown--;
+
+        if(this.is_warping) {
+            var speed = this.thrustSpeed * 2 / Math.pow(this.velmul, 3);
+            this.thrust(speed, this.rot);
+
+            this.warping_counter++;
+            if(this.warping_counter > WARP_AFTER_STEPS) {
+                this.field.game.warp();
+            }
+        }
 
         this.handleKeys();
         for(var keyname of Key.KEYNAMES) {
@@ -1100,10 +1130,10 @@ class Entity extends Sprite {
         this.addpos.set();
     }
     handleKeys() {
-        if(this.keys.u.wasDown) {
+        if(this.keys.u.wasDown && !this.is_warping) {
             this.thrust(this.thrustSpeed, this.rot);
         }
-        if(this.keys.d.wasDown) {
+        if(this.keys.d.wasDown && !this.is_warping) {
             this.thrust(this.reverseSpeed, this.rot + Math.PI);
         }
         if(this.keys.l.wasDown) {
@@ -1163,7 +1193,6 @@ class Entity extends Sprite {
         var speed_min = getDefault(opts.speed_min, 0);
         var speed_max = getDefault(opts.speed_max, 0);
 
-        var speed = Random.randNumber(speed_min, speed_max);
         var velmul = .8;
         var shots = [];
         for(var i = 0; i < n_shots; i++) {
@@ -1173,6 +1202,7 @@ class Entity extends Sprite {
             shot.rot = this.rot
                 + getRotVariance(i, n_shots) * rot_variance
                 + Random.randNumber(-.5, .5) * rand_rot_variance;
+            var speed = Random.randNumber(speed_min, speed_max);
             shot.vel.copy(this.vel).mul(velmul)
                 .addSpeed(speed, shot.rot);
             shot.afterShotBy(this);
@@ -1233,9 +1263,20 @@ class Entity extends Sprite {
         return d < this.radius + other.radius;
     }
     handleCollision(other) {
+        /* We collided with another Entity! Now what?
+        (Subclasses are free to answer that question in various ways...) */
+
+        if(this.is_warping) {
+            this.die();
+        }
+    }
+    handleCollisionPhysics(other) {
         /* We collided with another Entity!
         We are both pushed away, and take on some of each others
-        velocity. */
+        velocity.
+        NOTE: unlike handleCollision, this method is only called once
+        per step for any given pair of entities.
+        Subclasses should not override this method. */
 
         /* r0: number between 0 and 1.
         The closer it is to 1, the larger this.radius is than other.radius.
@@ -1262,13 +1303,13 @@ class Entity extends Sprite {
         var mx = dx / dist * (dist - tdist);
         var my = dy / dist * (dist - tdist);
 
-        var posmul = .25;
+        var posmul = .5;
         this.addpos.x  += mx * r1 * posmul;
         this.addpos.y  += my * r1 * posmul;
         other.addpos.x -= mx * r0 * posmul;
         other.addpos.y -= my * r0 * posmul;
 
-        var velmul = .35;
+        var velmul = .7;
         this.vel.x  += mx * r1 * velmul;
         this.vel.y  += my * r1 * velmul;
         other.vel.x -= mx * r0 * velmul;
@@ -1307,6 +1348,10 @@ class Entity extends Sprite {
         this.vel.y  += my * r1 * pullTo;
         other.vel.x -= mx * r0 * pullOn;
         other.vel.y -= my * r0 * pullOn;
+    }
+    beginWarp() {
+        this.is_warping = true;
+        this.vel.addSpeed(this.thrustSpeed * 5, this.rot);
     }
     render(canvas, camera) {
         var fade = 1;
@@ -1381,6 +1426,9 @@ class Camera extends Particle {
 }
 
 class Player {
+
+    shipClass = null;
+
     constructor() {
         this.entity = null;
         this.keys = Key.createKeys();
@@ -1531,8 +1579,27 @@ class Game {
 
         this.progress.proceed();
 
+        // Figure out which player's ship our camera is targeting.
+        // This is a bit of a hack...
+        var targetPlayer = null;
+        for(var player of this.players) {
+            if(player.entity === this.camera.target) {
+                targetPlayer = player;
+                break;
+            }
+        }
+
+        this.camera.unsetTarget();
+
         this.field.cleanup();
         this._createField();
+
+        for(var player of this.players) {
+            var ship = this.addShip(player.shipClass);
+            player.setEntity(ship);
+        }
+
+        if(targetPlayer) this.camera.setTarget(targetPlayer.entity);
     }
     onKeyDown(event) {
         this.keyDown(event.keyCode);
@@ -1550,6 +1617,12 @@ class Game {
             this.menu.keyDown(keyCode);
         } else if(keyCode === KEY_ESCAPE) {
             this.setTitleMenu();
+        } else if(keyCode === KEY_WARP) {
+            // HACK!
+            var ship = this.camera.target;
+            if(ship && !ship.is_warping) {
+                ship.beginWarp();
+            }
         } else {
             var key = this.keysByCode[keyCode];
             if(key) key.down();
@@ -1776,6 +1849,7 @@ class TitleMenu extends Menu {
     }
     updateShipClass() {
         var cls = SHIP_CLASSES[this.ship_class_i];
+        this.player.shipClass = cls;
         var ship = this.game.addShip(cls);
 
         var old_ship = this.player.entity;
@@ -2538,7 +2612,7 @@ class MineShot extends Shot {
     circleFillStyle = 'rgba(255,180,0,.4)';
 
     die() {
-        var shots = this.emitShots(FlameShot, 5, {
+        var shots = this.emitShots(FlameShot, 10, {
             rot_variance: Math.PI * 2,
             rand_rot_variance: Math.PI / 3,
             speed_min: 3,
@@ -2680,6 +2754,7 @@ var defaultMap = (function() {
             'Spacebar  : fire weapon / use ability #1',
             'Shift     : fire weapon / use ability #2',
             'Escape    : open menu',
+            'W         : attempt to warp to next area',
         ]),
     );
 
