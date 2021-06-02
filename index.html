@@ -28,7 +28,6 @@ body {
 /******************************
 * IDEAS:
 *
-* Chomper ship (light tractor beam at short distances, using Entity.magneticField
 * Rammer ship
 * Really big ship (MotherShip) with "gravity" using Entity.magneticField
 * Hunter ship?.. BlasterShot + "wormhole" ability?..
@@ -820,7 +819,11 @@ class Shape {
     close = true;
 
     constructor(points, props) {
+
+        this.pos = new Point();
+        this.rot = 0;
         this.points = points || [];
+
         if(props) for(var name in props) {
             if(name in this) this[name] = props[name];
         }
@@ -840,6 +843,20 @@ class Shape {
             points.push(point);
         }
         return new this(points, props);
+    }
+    clone() {
+        var points = this.points.map(p => p.clone());
+        var shape = new Shape(points);
+        shape.stroke = this.stroke;
+        shape.fill = this.fill;
+        shape.close = this.close;
+        shape.rot = this.rot;
+        shape.pos = this.pos.clone();
+        return shape;
+    }
+    flip() {
+        for(var point of this.points) point.y = -point.y;
+        return this;
     }
     add(other_point) {
         for(var point of this.points) point.add(other_point);
@@ -886,7 +903,12 @@ class Picture {
             var firstPoint = true;
             ctx.beginPath();
             for(var point of shape.points) {
-                p.copy(point).mul(radius).rotate(rot).addxy(x0, y0);
+                p.copy(point)
+                    .rotate(shape.rot)
+                    .add(shape.pos)
+                    .rotate(rot)
+                    .mul(radius)
+                    .addxy(x0, y0);
                 if(firstPoint) {
                     ctx.moveTo(p.x, p.y);
                     firstPoint = false;
@@ -1079,7 +1101,14 @@ class Entity extends Sprite {
         this._shouldRemove = false;
     }
     damage(hp) {
+        // hp < 0: this thing is invincible
         if(this.hp < 0) return;
+
+        // hp === 0: this thing is already dead
+        // (This check is important so we don't call this.die() multiple
+        // times on the same thing, which can e.g. result in a LOT of rocks
+        // being generated when this is a Rock)
+        if(this.hp === 0) return;
 
         if(this instanceof Ship && NODAMAGE) return;
 
@@ -1832,9 +1861,8 @@ class TitleMenu extends Menu {
         this.player = player;
 
         var ship = player.entity;
-        if(ship) {
-            this.ship_class_i = SHIP_CLASSES.indexOf(ship.constructor);
-        }
+        this.ship_class_i = player.shipClass === null?
+            0: SHIP_CLASSES.indexOf(player.shipClass);
 
         this.updateShipClass();
     }
@@ -2394,44 +2422,79 @@ class EngineerShip extends Ship {
 }
 
 class ChomperShip extends Ship {
-    radius = 10 * RADIUSMUL;
+    radius = 14 * RADIUSMUL;
+    thrustSpeed = 4.5;
+    reverseSpeed = 3.5;
+    velmul = .85;
+    rotspeed = Math.PI / 30;
+    rotmul = .725;
 
-    velmul = .9;
-
-    static maxhp = 150;
+    static maxhp = 300;
 
     shotClass = {
         x: ChompShot,
         y: null,
     };
 
-    picture = new Picture([
-        new Shape([
-            // Body
-            new Point(-.8, -.7),
-            new Point(  0,   0),
-            new Point(-.8,  .7),
-        ]),
-        new Shape([
-            // Left arm
+    constructor(field) {
+        super(field);
+
+        this.chomp_thrust = this.thrustSpeed * 10;
+        this.chomp_cooldown = 32;
+
+        // Set up this.picture with Shapes assigned to properties of
+        // this so that we can easily animate them
+        this.left_arm = new Shape([
             new Point(  0, -.4),
             new Point( .2, -.9),
             new Point(  1, -.4),
-        ]),
-        new Shape([
-            // Right arm
-            new Point(  0,  .4),
-            new Point( .2,  .9),
-            new Point(  1,  .4),
-        ]),
-    ]);
+        ]);
+        this.right_arm = this.left_arm.clone().flip();
+        this.picture = new Picture([
+            new Shape([
+                // Body
+                new Point(  0, -.7),
+                new Point(-.8,   0),
+                new Point(  0,  .7),
+            ]),
+            this.left_arm,
+            this.right_arm,
+        ]);
+    }
+    step() {
+        super.step();
+        this.animate();
+    }
+    animate() {
+        var i = this.shotprops.x.cooldown / this.chomp_cooldown;
 
+        // NOTE: arm_addx, arm_addy seem to have less effect than I expected.
+        // Bug in Picture.render?..
+        var arm_addx = 1 * i;
+        var arm_addy = .5 * i;
+
+        var arm_rot = -Math.PI / 2 * i;
+
+        this.left_arm.pos.set(arm_addx, arm_addy);
+        this.left_arm.rot = arm_rot;
+
+        this.right_arm.pos.set(arm_addx, -arm_addy);
+        this.right_arm.rot = -arm_rot;
+    }
+    turn(rot) {
+
+        // This is kind of cool, but doesn't quite feel right.
+        //var speed = rot * this.thrustSpeed * 4;
+        //this.vel.addSpeed(speed, this.rot + Math.PI / 2);
+
+        super.turn(rot);
+    }
     fire(keyname) {
         if(keyname === 'y') {
-            this.thrust(this.thrustSpeed * 25, this.rot);
+            this.thrust(this.chomp_thrust, this.rot);
 
             var shotprops = this.shotprops[keyname];
-            shotprops.cooldown += 32;
+            shotprops.cooldown += this.chomp_cooldown;
         } else {
             super.fire(keyname);
         }
@@ -2679,7 +2742,7 @@ class MineShot extends Shot {
     circleFillStyle = 'rgba(255,180,0,.4)';
 
     die() {
-        var shots = this.emitShots(FlameShot, 10, {
+        var shots = this.emitShots(FlameShot, 5, {
             rot_variance: Math.PI * 2,
             rand_rot_variance: Math.PI / 3,
             speed_min: 3,
@@ -2692,15 +2755,17 @@ class MineShot extends Shot {
 
 class ChompShot extends Shot {
     radius = 14 * RADIUSMUL;
-    static initialSpeed = 18;
-    static initialVelMul = .75;
+    static initialSpeed = 24;
+    static initialVelMul = 1;
     velmul = .9;
 
-    hitVelMul = .4;
-    hitDamage = 25;
+    hitVelMul = .2;
+    hitDamage = 16;
 
-    maxAge = 4;
-    static cooldown = 16;
+    maxAge = 5;
+    static cooldown = 6;
+
+    circleStrokeStyle = 'rgba(255,150,0,.4)';
 
     picture = new Picture([
         new Shape([
@@ -2710,8 +2775,16 @@ class ChompShot extends Shot {
         ], {fill: false, close: false}),
     ]);
 
+    hit(other) {
+        var velmul = .1;
+        var rot_velmul = .1;
+        other.vel.mul(velmul);
+        other.rot_vel *= rot_velmul;
+
+        super.hit(other);
+    }
     die() {
-        this.emitEffects(SparkEffect, 5, {
+        this.emitEffects(SparkEffect, 3, {
             speed_min: 3,
             speed_max: 6,
             velmul: .65,
