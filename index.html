@@ -92,6 +92,21 @@ var KEY_SHIFT = 16;
 var KEY_ESCAPE = 27;
 var KEY_WARP = 87; // 'W'
 
+var TEAMS = [
+    {
+        strokeStyle: '#0f0',
+    },
+    {
+        strokeStyle: '#00f',
+    },
+    {
+        strokeStyle: '#f00',
+    },
+    {
+        strokeStyle: '#ff0',
+    },
+];
+
 
 function linear(x0, x1, n) {
     /* Assumes: 0 <= n <= 1 */
@@ -593,6 +608,7 @@ class Field {
         for(var i = 0; i < n_ships; i++) {
             var cls = Random.choice(template.ship_classes);
             var ship = this.game.addShip(cls);
+            ship.setTeam(Random.choice(TEAMS));
             ship.pos.setRandomWithin(this.size);
             ship.rot = Random.randRotation();
 
@@ -1097,8 +1113,15 @@ class Entity extends Sprite {
 
         this.keys = Key.createKeys();
 
+        this.setTeam(TEAMS[0]);
+
         this.age = 0;
         this._shouldRemove = false;
+    }
+    setTeam(team) {
+        this.team = team;
+        this.lineStrokeStyle = team.strokeStyle;
+        this.circleStrokeStyle = team.strokeStyle;
     }
     damage(hp) {
         // hp < 0: this thing is invincible
@@ -1249,6 +1272,7 @@ class Entity extends Sprite {
         for(var i = 0; i < n_shots; i++) {
             var shot = this.field.addShot(cls);
             shot.ship = this.ship;
+            shot.setTeam(this.team);
             shot.pos.copy(this.pos);
             shot.rot = this.rot
                 + getRotVariance(i, n_shots) * rot_variance
@@ -1281,6 +1305,7 @@ class Entity extends Sprite {
 
         var shot = this.field.addShot(cls);
         shot.ship = this;
+        shot.setTeam(this.team);
 
         shot.rot = this.rot
             + getRotVariance(shot_i, cls.initialShots)
@@ -1983,7 +2008,7 @@ class Ship extends Entity {
         super.die();
     }
     isAlly(other) {
-        if(this === other) return true;
+        if(this === other || this.team === other.team) return true;
         return this._isAlly(other) || other._isAlly(this);
     }
     _isAlly(other) {
@@ -2176,7 +2201,10 @@ class TurretShip extends Ship {
         super.remove();
     }
     _isAlly(other) {
-        if(other.flagship && other.flagship === this.flagship) return true;
+        if(
+            other.flagship && this.flagShip &&
+            other.flagship.isAlly(this.flagship)
+        ) return true;
         return super._isAlly(other);
     }
 }
