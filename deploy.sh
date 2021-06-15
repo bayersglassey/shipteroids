@@ -1,3 +1,5 @@
+set -euo pipefail
+
 . ip.sh
 ssh shipteroids@$IP '
     set euo -pipefail
