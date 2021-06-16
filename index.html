@@ -396,6 +396,8 @@ class FieldTemplate {
 
     ship_classes = SHIP_CLASSES;
 
+    teams = TEAMS;
+
     constructor(props) {
         if(props) for(var name in props) {
             if(name in this) this[name] = props[name];
@@ -608,7 +610,7 @@ class Field {
         for(var i = 0; i < n_ships; i++) {
             var cls = Random.choice(template.ship_classes);
             var ship = this.game.addShip(cls);
-            ship.setTeam(Random.choice(TEAMS));
+            ship.setTeam(Random.choice(template.teams));
             ship.pos.setRandomWithin(this.size);
             ship.rot = Random.randRotation();
 
@@ -1507,6 +1509,7 @@ class Player {
 
     constructor() {
         this.entity = null;
+        this.team = TEAMS[0];
         this.keys = Key.createKeys();
     }
     setEntity(entity) {
@@ -1672,6 +1675,7 @@ class Game {
 
         for(var player of this.players) {
             var ship = this.addShip(player.shipClass);
+            ship.setTeam(player.team);
             player.setEntity(ship);
         }
 
@@ -1926,6 +1930,7 @@ class TitleMenu extends Menu {
         var cls = SHIP_CLASSES[this.ship_class_i];
         this.player.shipClass = cls;
         var ship = this.game.addShip(cls);
+        ship.setTeam(this.player.team);
 
         var old_ship = this.player.entity;
         if(old_ship) {
@@ -2254,6 +2259,7 @@ class FlagShip extends Ship {
     }
     addTurret() {
         var turret = this.field.addShip(TurretShip);
+        turret.setTeam(this.team);
         turret.pos.copy(this.pos)
             .addSpeed(this.radius + turret.radius, this.rot);
         turret.vel.copy(this.vel);
@@ -2730,7 +2736,7 @@ class FlameShot extends Shot {
 
     hitVelMul = 0;
     hitDamage = 5;
-    hitDamageAgeMul = .9;
+    hitDamageAgeMul = .975;
     hitEffectClass = FlameSmokeEffect;
 
     static cooldown = 1;
@@ -2761,7 +2767,7 @@ class MineShot extends Shot {
     static initialSpeed = 0;
     velmul = .9;
 
-    hitDamage = 15;
+    hitDamage = 10;
 
     maxAge = 300;
     static cooldown = 32;
