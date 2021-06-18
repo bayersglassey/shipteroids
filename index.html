@@ -1644,33 +1644,6 @@ class CPUPlayer extends Player {
     }
 }
 
-class Warp {
-    /* Represents a warp point. If a player flies very fast towards
-    this, they will "warp" towards the associated MapNode or MapEdge. */
-
-    // addradius: each step, this is determined according to whether any
-    // players' entities' rots are close to this Warp's rot, and then each
-    // Warp's addradius is used when rendering it.
-    // In other words, this is used for a purely visual effect, where if
-    // a player is facing towards a Warp, then the Warp is rendered bigger.
-    addradius = 0;
-
-    constructor(game, destination, rot) {
-        this.game = game;
-
-        // destination: MapNode or MapEdge
-        this.destination = destination;
-
-        this.rot = rot;
-
-        var addrotmul = Math.PI / 120;
-        this.addrot = Random.randNumber(-.5, .5) * addrotmul;
-    }
-    step() {
-        this.rot += this.addrot;
-    }
-}
-
 class Game {
 
     constructor(canvas, progress) {
@@ -1681,8 +1654,6 @@ class Game {
         this.intervalId = 0;
         this.players = [];
         this.menu = null;
-
-        this.warpGradient = this.createWarpGradient();
 
         /* Hashmap from keyCode values to Key instances belonging to
         Player instances in this.players */
@@ -1697,8 +1668,6 @@ class Game {
         // NOTE: need to set this.cpus before calling the Field constructor
         this.cpus = [];
 
-        this.warps = this.createWarps();
-
         // destination: MapNode or MapEdge
         var destination = this.progress.getDestination();
         var template = destination.template;
@@ -1711,57 +1680,6 @@ class Game {
         this.field.populate(template);
 
         this.camera = new Camera(this.field);
-    }
-    createWarpGradient() {
-        var ctx = this.canvas.getContext('2d');
-        var gradient = ctx.createRadialGradient(
-            // x0, y0, r0
-            0, 0, 0,
-            // x1, y1, r1
-            0, 0, 1);
-
-        gradient.addColorStop(.5, 'rgba(30,200,255,.4)');
-        gradient.addColorStop(1,  'rgba(30,200,255,0)');
-        return gradient;
-    }
-    createWarps() {
-        // destination: MapNode or MapEdge
-        var destination = this.progress.getDestination();
-
-        var addrot = Random.randRotation();
-
-        var warps = [];
-        var n_warps = destination instanceof MapNode?
-            destination.edges.length: 1;
-        for(var i = 0; i < n_warps; i++) {
-            var i2 = i + Random.randNumber(-.5, .5) * .7;
-            var rot = (i2 / n_warps) * Math.PI * 2 + addrot;
-            var warp = new Warp(this, destination, rot);
-            warps.push(warp);
-        }
-        return warps;
-    }
-    renderWarps() {
-        var canvas = this.canvas;
-        var ctx = canvas.getContext('2d');
-
-        ctx.strokeStyle = 'transparent';
-        ctx.fillStyle = this.warpGradient;
-
-        var posradius = Math.min(canvas.width, canvas.height) / 2;
-
-        var p = new Point();
-
-        for(var warp of this.warps) {
-            p.set().addSpeed(posradius, warp.rot);
-
-            var radius = WARP_RADIUS + warp.addradius;
-
-            var x0 = canvas.width / 2 + p.x;
-            var y0 = canvas.height / 2 + p.y;
-
-            renderCircle(ctx, x0, y0, warp.rot, 1, {scale: radius});
-        }
     }
     warp() {
         /* Warp to the next Field */
@@ -1868,33 +1786,8 @@ class Game {
 
         this.progress.map.step();
         this.field.step();
-        this.stepWarps();
         this.camera.step();
         this.camera.stepPhysics();
-    }
-    stepWarps() {
-        for(var warp of this.warps) {
-            warp.step();
-
-            var max_d = 0;
-            var addradius = 0;
-            for(var player of this.players) {
-                var entity = player.entity;
-                if(!entity) continue;
-                var d = Math.abs(rotDiff(entity.rot, warp.rot));
-                var max_d = Math.PI / 3;
-                if(d < max_d) {
-                    // Increase warp radius based on whether we're pointing
-                    // at it (d_mul), and increase it further depending on
-                    // how far along we are in warping (c_mul)
-                    var d_mul = 1 - d / max_d;
-                    var c_mul = 1 + entity.warping_counter / WARP_AFTER_STEPS;
-                    addradius += MAX_WARP_ADDRADIUS * d_mul * c_mul;
-                }
-            }
-
-            warp.addradius = addradius;
-        }
     }
     render() {
         var canvas = this.canvas;
@@ -1904,7 +1797,6 @@ class Game {
         if(this.menu) {
             this.menu.render();
         } else {
-            this.renderWarps();
             var text = this.progress.getDestination().text;
             if(text && !HIDE_TEXT) text.render(canvas);
         }
