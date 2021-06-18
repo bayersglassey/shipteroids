@@ -93,6 +93,7 @@ var KEY_SPACE = 32;
 var KEY_SHIFT = 16;
 var KEY_ESCAPE = 27;
 var KEY_WARP = 87; // 'W'
+var KEY_TAB = 9;
 
 var TEAMS = [
     {
@@ -445,12 +446,31 @@ class MapNode extends MapDestination {
         super(map, template);
         this.text = text || null;
         this.edges = [];
+        this.backedges = [];
+
+        // radius, pos, vel: don't affect anything, only used for rendering the
+        // Map and its nodes/edges as a graph with "springy physics"
+        // (also apparently known as a "force-directed graph")
+        var speed = Random.randNumber(250);
+        var rot = Random.randRotation();
+        this.pos = new Point().addSpeed(speed, rot);
+        this.vel = new Point();
+        this.radius = 12;
+
+        this.strokeStyle = 'rgba(20,100,200,.75)';
+        this.fillStyle = 'rgba(255,255,255,.25)';
     }
     addEdge(other, len, template) {
         template = template || this.template;
         var edge = new MapEdge(this.map, template, this, other, len);
+        var backedge = new MapBackedge(edge);
+        edge.backedge = backedge;
         this.edges.push(edge);
+        other.backedges.push(backedge);
         return edge;
+    }
+    step() {
+        this.pos.add(this.vel);
     }
 }
 
@@ -460,11 +480,50 @@ class MapEdge extends MapDestination {
     warps you need to make in order to travel from this.node0 to
     this.node0. */
 
+    // backedge: set by MapNode.addEdge
+    backedge = null;
+
     constructor(map, template, node0, node1, len) {
         super(map, template);
         this.node0 = node0;
         this.node1 = node1;
         this.len = getDefault(len, 0);
+
+        this.strokeStyle = 'rgba(20,100,200,.75)';
+    }
+
+    ////////////////////////////////////////////////////////////////////
+    // Methods defining an "interface" shared by MapEdge and MapBackEdge
+    getEdge() {
+        return this;
+    }
+    getNode0() {
+        return this.node0;
+    }
+    getNode1() {
+        return this.node1;
+    }
+}
+
+class MapBackedge {
+    /* Simple wrapper for a MapEdge.
+    Each MapNode stores an Array of these so that you can quickly look
+    up edges *to* that node. */
+
+    constructor(edge) {
+        this.edge = edge;
+    }
+
+    ////////////////////////////////////////////////////////////////////
+    // Methods defining an "interface" shared by MapEdge and MapBackEdge
+    getEdge() {
+        return this.edge;
+    }
+    getNode0() {
+        return this.edge.node1;
+    }
+    getNode1() {
+        return this.edge.node0;
     }
 }
 
@@ -482,6 +541,9 @@ class Map {
         this.nodes.push(node);
         return node;
     }
+    step() {
+        for(var node of this.nodes) node.step();
+    }
 }
 
 class MapProgress {
@@ -493,7 +555,11 @@ class MapProgress {
         if(!map.nodes.length) throw new Error('Map has no nodes');
         this.map = map;
 
+        // node is never null
         this.node = null;
+
+        // edge is null if we're at a node; edge is not null when we're
+        // travelling from this.node to this.edge.node1
         this.edge = null;
 
         // edgeDist: how far we've travelled along this.edge (if it's not
@@ -1073,6 +1139,9 @@ class Entity extends Sprite {
     maxAge = -1;
     fadeWithAge = false;
 
+    team = null;
+    inheritTeamColor = true;
+
     SHOT_KEYNAMES = 'xy';
     shotClass = {
         x: null,
@@ -1092,8 +1161,7 @@ class Entity extends Sprite {
 
     static maxhp = -1;
 
-    addhp = 1;
-    addhp_per_age = 40;
+    addhp = 1 / 40;
 
     constructor(field) {
         super(field);
@@ -1129,8 +1197,13 @@ class Entity extends Sprite {
     }
     setTeam(team) {
         this.team = team;
-        this.lineStrokeStyle = team.strokeStyle;
-        this.circleStrokeStyle = team.strokeStyle;
+        if(this.inheritTeamColor) {
+            this.lineStrokeStyle = team.strokeStyle;
+            this.circleStrokeStyle = team.strokeStyle;
+        }
+    }
+    heal(addhp) {
+        if((this.hp += addhp) > this.maxhp) this.hp = this.maxhp;
     }
     damage(hp) {
         // hp < 0: this thing is invincible
@@ -1192,9 +1265,7 @@ class Entity extends Sprite {
             this.keys[keyname].step();
         }
 
-        if(this.age % this.addhp_per_age === 0) {
-            if((this.hp += this.addhp) > this.maxhp) this.hp = this.maxhp;
-        }
+        this.heal(this.addhp);
 
         this.age++;
         if(this.maxAge >= 0 && this.age >= this.maxAge) {
@@ -1736,6 +1807,8 @@ class Game {
             this.menu.keyDown(keyCode);
         } else if(keyCode === KEY_ESCAPE) {
             this.setTitleMenu();
+        } else if(keyCode === KEY_TAB) {
+            this.setMapMenu();
         } else if(keyCode === KEY_WARP) {
             // HACK!
             var ship = this.camera.target;
@@ -1748,7 +1821,9 @@ class Game {
         }
     }
     keyUp(keyCode) {
-        if(this.menu) {
+        if(this.menu instanceof MapMenu && keyCode === KEY_TAB) {
+            this.unsetMenu();
+        } else if(this.menu) {
             this.menu.keyUp(keyCode);
         } else {
             var key = this.keysByCode[keyCode];
@@ -1757,7 +1832,11 @@ class Game {
     }
     setMenu(cls) {
         this.unsetMenu();
-        return this.menu = new cls(this);
+        this.menu = new cls(this);
+
+        // Unpress all keys so our ship doesn't fly in circles
+        // or whatever while menu is open
+        for(var key of Object.values(this.keysByCode)) key.up();
     }
     unsetMenu() {
         if(!this.menu) return;
@@ -1765,12 +1844,10 @@ class Game {
         this.menu = null;
     }
     setTitleMenu() {
-        var menu = this.setMenu(TitleMenu);
-        if(this.players.length > 0) {
-            // Hack: choose first player
-            var player = this.players[0];
-            menu.setPlayer(player);
-        }
+        this.setMenu(TitleMenu);
+    }
+    setMapMenu() {
+        this.setMenu(MapMenu);
     }
     addShip(cls) {
         return this.field.addShip(cls);
@@ -1789,6 +1866,7 @@ class Game {
         for(var player of this.players) player.step();
         for(var player of this.cpus) player.step();
 
+        this.progress.map.step();
         this.field.step();
         this.stepWarps();
         this.camera.step();
@@ -1934,6 +2012,12 @@ class TitleMenu extends Menu {
     constructor(game) {
         super(game);
         this.action_i = 0;
+
+        if(game.players.length > 0) {
+            // Hack: choose first player
+            var player = game.players[0];
+            this.setPlayer(player);
+        }
     }
     setPlayer(player) {
         this.player = player;
@@ -2000,6 +2084,97 @@ class TitleMenu extends Menu {
 
         this.game.camera.setTarget(ship);
         this.player.setEntity(ship);
+    }
+}
+
+class MapMenu extends Menu {
+
+    node = null;
+    edge_i = 0;
+
+    constructor(game) {
+        super(game);
+        this.setNode(game.progress.node);
+    }
+    getEdgeOrBackedge() {
+        var n_edges = this.node.edges.length + this.node.backedges.length;
+        if(!n_edges) return null;
+        var edge_i = modulo(this.edge_i, n_edges);
+        return (edge_i < this.node.edges.length)?
+            this.node.edges[edge_i]:
+            this.node.backedges[edge_i - this.node.edges.length];
+    }
+    getEdge() {
+        var e = this.getEdgeOrBackedge();
+        return e? e.getEdge(): null;
+    }
+    setNode(node) {
+        this.node = node;
+        this.edge_i = 0;
+    }
+    keyDown(keyCode) {
+        if(keyCode === KEY_U) {
+            var edge = this.getEdgeOrBackedge();
+            if(edge) this.setNode(edge.getNode1());
+        } else if(keyCode === KEY_L) {
+            this.edge_i--;
+        } else if(keyCode === KEY_R) {
+            this.edge_i++;
+        }
+    }
+    render() {
+        var canvas = this.game.canvas;
+        var ctx = canvas.getContext('2d');
+        var x0 = canvas.width / 2 - this.node.pos.x;
+        var y0 = canvas.height / 2 - this.node.pos.y;
+
+        var progress = this.game.progress;
+        var map = progress.map;
+        for(var node of map.nodes) {
+            var x = x0 + node.pos.x;
+            var y = y0 + node.pos.y;
+            var radius = node.radius;
+            var strokeStyle = node.strokeStyle;
+            var fillStyle = node.fillStyle;
+            var lineWidth = 2;
+
+            if(node === progress.node) {
+                radius += 4;
+                lineWidth += 2;
+            }
+            if(node === this.node) {
+                strokeStyle = '#fff';
+            }
+
+            ctx.strokeStyle = strokeStyle;
+            ctx.fillStyle = fillStyle;
+            ctx.lineWidth = lineWidth;
+            renderCircle(ctx, x, y, 0, radius);
+
+            for(var edge of node.edges) {
+                var node2 = edge.node1;
+                var x2 = x0 + node2.pos.x;
+                var y2 = y0 + node2.pos.y;
+                var strokeStyle = edge.strokeStyle;
+                var lineWidth = 1;
+
+                if(edge === progress.edge) {
+                    lineWidth += 2;
+                }
+                if(edge === this.getEdge()) {
+                    strokeStyle = '#fff';
+                }
+
+                ctx.lineWidth = lineWidth;
+                ctx.strokeStyle = strokeStyle;
+
+                ctx.beginPath();
+                ctx.moveTo(x, y);
+                ctx.lineTo(x2, y2);
+                ctx.closePath();
+                ctx.stroke();
+            }
+        }
     }
 }
 
@@ -2372,7 +2547,7 @@ class MoleShip extends Ship {
     static maxhp = 60;
 
     shotClass = {
-        x: DoubleShot,
+        x: ShortDoubleShot,
         y: null,
     };
 
@@ -2410,6 +2585,8 @@ class MoleShip extends Ship {
 
             rock.rot_vel *= .95;
             rock.vel.mul(this.velmul);
+
+            rock.heal(1 / 20);
         }
         super.step();
     }
@@ -2506,11 +2683,11 @@ class EngineerShip extends Ship {
 
 class ChomperShip extends Ship {
     radius = 14 * RADIUSMUL;
-    thrustSpeed = 4.5;
-    reverseSpeed = 3.5;
+    thrustSpeed = 3.25;
+    reverseSpeed = 2.5;
     velmul = .85;
     rotspeed = Math.PI / 30;
-    rotmul = .725;
+    rotmul = .65;
 
     static maxhp = 300;
 
@@ -2644,10 +2821,15 @@ class Shot extends Entity {
 class SingleShot extends Shot {
     radius = 3 * RADIUSMUL;
     velmul = .95;
+    static initialSpeed = 23;
     hitDamageAgeMul = .95;
     shouldRenderTrail = true;
     maxAge = 40;
     fadeWithAge = true;
+}
+
+class ShortSingleShot extends SingleShot {
+    static initialSpeed = 17;
 }
 
 class RapidSingleShot extends SingleShot {
@@ -2669,6 +2851,12 @@ class DoubleShot extends SingleShot {
     static serialRotVariance = Math.PI / 18;
 }
 
+class ShortDoubleShot extends ShortSingleShot {
+    static serialShots = 2;
+    static serialRotVariance = Math.PI / 26;
+    static serialPosRotVariance = Math.PI / 3;
+}
+
 class TripleShot extends SingleShot {
     static initialShots = 3;
     static serialShots = 1;
@@ -2685,8 +2873,8 @@ class QuadrupleShot extends SingleShot {
 }
 
 class BlasterShot extends Shot {
-    radius = 8 * RADIUSMUL;
-    static initialSpeed = 12;
+    radius = 10 * RADIUSMUL;
+    static initialSpeed = 14;
     static initialVelMul = .7;
     velmul = 1;
 
@@ -2715,7 +2903,7 @@ class BlasterShot extends Shot {
 
 class MissileShot extends Shot {
     radius = 6 * RADIUSMUL;
-    static initialSpeed = 8;
+    static initialSpeed = 10;
     static initialVelMul = .2;
     velmul = .9;
 
@@ -2837,18 +3025,19 @@ class MineShot extends Shot {
 }
 
 class ChompShot extends Shot {
-    radius = 14 * RADIUSMUL;
+    radius = 10 * RADIUSMUL;
     static initialSpeed = 24;
     static initialVelMul = 1;
     velmul = .9;
 
-    hitVelMul = .2;
-    hitDamage = 16;
+    hitVelMul = .325;
+    hitDamage = 10;
 
     maxAge = 5;
     static cooldown = 6;
 
     circleStrokeStyle = 'rgba(255,150,0,.4)';
+    inheritTeamColor = false;
 
     picture = new Picture([
         new Shape([
@@ -2859,20 +3048,12 @@ class ChompShot extends Shot {
     ]);
 
     hit(other) {
-        var velmul = .1;
-        var rot_velmul = .1;
+        var velmul = .35;
+        var rot_velmul = .3;
         other.vel.mul(velmul);
         other.rot_vel *= rot_velmul;
 
         super.hit(other);
-    }
-    die() {
-        this.emitEffects(SparkEffect, 3, {
-            speed_min: 3,
-            speed_max: 6,
-            velmul: .65,
-        });
-        super.die();
     }
 }
 
