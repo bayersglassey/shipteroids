@@ -435,22 +435,12 @@ class FieldTemplate {
     }
 }
 
-class MapDestination {
-    /* Somewhere you can be on a Map.
-    To be more precise, every MapProgress has an associated MapDestination,
-    which is either a MapNode or a MapEdge. */
-
-    constructor(map, template) {
-        this.map = map;
-        this.template = template;
-    }
-}
-
-class MapNode extends MapDestination {
+class MapNode {
     /* A node of the graph represented by class Map. */
 
     constructor(map, template, text) {
-        super(map, template);
+        this.map = map;
+        this.template = template;
         this.text = text || null;
         this.edges = [];
         this.backedges = [];
@@ -467,9 +457,8 @@ class MapNode extends MapDestination {
         this.strokeStyle = 'rgba(20,100,200,.75)';
         this.fillStyle = 'rgba(255,255,255,.25)';
     }
-    addEdge(other, len, template) {
-        template = template || this.template;
-        var edge = new MapEdge(this.map, template, this, other, len);
+    addEdge(other, len) {
+        var edge = new MapEdge(this, other, len);
         this.edges.push(edge);
         other.backedges.push(edge);
         return edge;
@@ -479,14 +468,13 @@ class MapNode extends MapDestination {
     }
 }
 
-class MapEdge extends MapDestination {
+class MapEdge {
     /* Connects one MapNode (this.node0) to another (this.node1).
     Has a length (this.len), an integer representing the number of
     warps you need to make in order to travel between this.node0 and
     this.node1. */
 
-    constructor(map, template, node0, node1, len) {
-        super(map, template);
+    constructor(node0, node1, len) {
         this.node0 = node0;
         this.node1 = node1;
         this.len = getDefault(len, 0);
@@ -567,7 +555,7 @@ class MapProgress {
         if(map.startEdge) this.setEdge(map.startEdge);
     }
     getDestination() {
-        return this.edge? this.edge.edge: this.node;
+        return this.edge? this.edge.getNode1(): this.node;
     }
     getText() {
         if(this.edge) return null;
@@ -3124,8 +3112,8 @@ var defaultMap = (function() {
     var rockNode = map.addNode(rockTemplate);
 
     tutorial1.addEdge(basicNode);
-    basicNode.addEdge(fireNode, 4, fireTemplate);
-    basicNode.addEdge(rockNode, 5, rockTemplate);
+    basicNode.addEdge(fireNode, 4);
+    basicNode.addEdge(rockNode, 5);
 
     map.startNode = tutorial1;
     return map;
