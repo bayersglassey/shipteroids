@@ -37,6 +37,13 @@ body {
 * When a player loses their ship, reset players' keys (otherwise e.g. they can
 * still be holding Up while you're in the menu choosing ships)
 *
+* Maybe... MapProgress.edge is never null?..
+* So the current thing where you are "at" a node would just be when edgeDist
+* is 0.
+* THIS IS IMPORTANT because otherwise we need to have something which
+* represents "the edge which will become progress.edge next time you
+* warp", which is vaguely obnoxious.
+*
 ******************************/
 
 
@@ -463,10 +470,8 @@ class MapNode extends MapDestination {
     addEdge(other, len, template) {
         template = template || this.template;
         var edge = new MapEdge(this.map, template, this, other, len);
-        var backedge = new MapBackedge(edge);
-        edge.backedge = backedge;
         this.edges.push(edge);
-        other.backedges.push(backedge);
+        other.backedges.push(edge);
         return edge;
     }
     step() {
@@ -477,11 +482,8 @@ class MapNode extends MapDestination {
 class MapEdge extends MapDestination {
     /* Connects one MapNode (this.node0) to another (this.node1).
     Has a length (this.len), an integer representing the number of
-    warps you need to make in order to travel from this.node0 to
-    this.node0. */
-
-    // backedge: set by MapNode.addEdge
-    backedge = null;
+    warps you need to make in order to travel between this.node0 and
+    this.node1. */
 
     constructor(map, template, node0, node1, len) {
         super(map, template);
@@ -489,41 +491,32 @@ class MapEdge extends MapDestination {
         this.node1 = node1;
         this.len = getDefault(len, 0);
 
-        this.strokeStyle = 'rgba(20,100,200,.75)';
-    }
+        this.forwardEdge = new DirectedMapEdge(this, false);
+        this.backEdge = new DirectedMapEdge(this, true);
 
-    ////////////////////////////////////////////////////////////////////
-    // Methods defining an "interface" shared by MapEdge and MapBackEdge
-    getEdge() {
-        return this;
-    }
-    getNode0() {
-        return this.node0;
-    }
-    getNode1() {
-        return this.node1;
+        this.strokeStyle = 'rgba(20,100,200,.75)';
     }
 }
 
-class MapBackedge {
-    /* Simple wrapper for a MapEdge.
-    Each MapNode stores an Array of these so that you can quickly look
-    up edges *to* that node. */
+class DirectedMapEdge {
+    /* Wraps a MapEdge, representing an arrow pointing along it in either
+    direction (that is, either from node0 to node1, or vice versa). */
 
-    constructor(edge) {
+    constructor(edge, isBackEdge) {
         this.edge = edge;
+        this.isBackEdge = isBackEdge;
     }
-
-    ////////////////////////////////////////////////////////////////////
-    // Methods defining an "interface" shared by MapEdge and MapBackEdge
-    getEdge() {
-        return this.edge;
+    getReversed() {
+        return this.isBackEdge? this.edge.forwardEdge: this.edge.backEdge;
+    }
+    getLen() {
+        return this.edge.len;
     }
     getNode0() {
-        return this.edge.node1;
+        return this.isBackEdge? this.edge.node1: this.edge.node0;
     }
     getNode1() {
-        return this.edge.node0;
+        return this.isBackEdge? this.edge.node0: this.edge.node1;
     }
 }
 
@@ -534,7 +527,7 @@ class Map {
     constructor() {
         this.nodes = [];
         this.startNode = null;
-        this.startEdge = null;
+        this.startEdge = null; // DirectedMapEdge
     }
     addNode(template, text) {
         var node = new MapNode(this, template, text);
@@ -558,21 +551,23 @@ class MapProgress {
         // node is never null
         this.node = null;
 
+        // edge: a DirectedMapEdge
         // edge is null if we're at a node; edge is not null when we're
-        // travelling from this.node to this.edge.node1
+        // travelling from this.node to this.edge.getNode1()
         this.edge = null;
 
         // edgeDist: how far we've travelled along this.edge (if it's not
         // null).
-        // Once this.edgeDist reaches this.edge.len, this.node is set to
-        // this.edge.node1, and this.edgeDist is set to 0.
+        // Once this.edgeDist reaches this.edge.getLen(), this.node is set
+        // to this.edge.getNode1(), and this.edgeDist is set to 0.
         this.edgeDist = 0;
 
         this.setNode(map.startNode || map.nodes[0]);
+
         if(map.startEdge) this.setEdge(map.startEdge);
     }
     getDestination() {
-        return this.edge? this.edge: this.node;
+        return this.edge? this.edge.edge: this.node;
     }
     getText() {
         if(this.edge) return null;
@@ -681,14 +676,9 @@ class Field {
 
         // Add ships
         for(var i = 0; i < n_ships; i++) {
-            var cls = Random.choice(template.ship_classes);
-            var ship = this.game.addShip(cls);
-            ship.setTeam(Random.choice(template.teams));
-            ship.pos.setRandomWithin(this.size);
-            ship.rot = Random.randRotation();
-
             var player = this.game.addCPUPlayer();
-            player.setEntity(ship);
+            player.setTeam(Random.choice(template.teams));
+            player.createShip(Random.choice(template.ship_classes));
         }
     }
     addEntityArray() {
@@ -1195,6 +1185,12 @@ class Entity extends Sprite {
         this.age = 0;
         this._shouldRemove = false;
     }
+    getPlayer() {
+        for(var player of this.field.game.players) {
+            if(player.entity === this) return player;
+        }
+        return null;
+    }
     setTeam(team) {
         this.team = team;
         if(this.inheritTeamColor) {
@@ -1603,18 +1599,34 @@ class Player {
 
     shipClass = null;
 
-    constructor() {
+    constructor(game) {
+        this.game = game;
         this.entity = null;
         this.team = TEAMS[0];
         this.keys = Key.createKeys();
     }
+    setTeam(team) {
+        this.team = team;
+        if(this.entity) this.entity.setTeam(team);
+    }
     setEntity(entity) {
         this.unsetEntity();
         this.entity = entity;
+        entity.setTeam(this.team);
     }
     unsetEntity() {
         if(!this.entity) return;
         this.entity = null;
+    }
+    createShip(cls) {
+        cls = cls || this.shipClass;
+        this.shipClass = cls;
+
+        var ship = this.game.addShip(cls);
+        ship.pos.setRandomWithin(this.game.field.size);
+        ship.rot = Random.randRotation();
+        this.setEntity(ship);
+        return ship;
     }
     step() {
         if(!this.entity) return;
@@ -1701,11 +1713,7 @@ class Game {
         this.field.cleanup();
         this._createField();
 
-        for(var player of this.players) {
-            var ship = this.addShip(player.shipClass);
-            ship.setTeam(player.team);
-            player.setEntity(ship);
-        }
+        for(var player of this.players) player.createShip();
 
         if(targetPlayer) this.camera.setTarget(targetPlayer.entity);
     }
@@ -1771,12 +1779,12 @@ class Game {
         return this.field.addShip(cls);
     }
     addPlayer() {
-        var player = new Player();
+        var player = new Player(this);
         this.players.push(player);
         return player;
     }
     addCPUPlayer() {
-        var player = new CPUPlayer();
+        var player = new CPUPlayer(this);
         this.cpus.push(player);
         return player;
     }
@@ -1952,12 +1960,11 @@ class TitleMenu extends Menu {
         }
     }
     updateShipClass() {
-        var cls = SHIP_CLASSES[this.ship_class_i];
-        this.player.shipClass = cls;
-        var ship = this.game.addShip(cls);
-        ship.setTeam(this.player.team);
-
         var old_ship = this.player.entity;
+
+        var cls = SHIP_CLASSES[this.ship_class_i];
+        var ship = this.player.createShip(cls);
+
         if(old_ship) {
             ship.pos.copy(old_ship.pos);
             ship.vel.copy(old_ship.vel);
@@ -1975,7 +1982,6 @@ class TitleMenu extends Menu {
         }
 
         this.game.camera.setTarget(ship);
-        this.player.setEntity(ship);
     }
 }
 
@@ -1988,17 +1994,13 @@ class MapMenu extends Menu {
         super(game);
         this.setNode(game.progress.node);
     }
-    getEdgeOrBackedge() {
+    getEdge() {
         var n_edges = this.node.edges.length + this.node.backedges.length;
         if(!n_edges) return null;
         var edge_i = modulo(this.edge_i, n_edges);
         return (edge_i < this.node.edges.length)?
-            this.node.edges[edge_i]:
-            this.node.backedges[edge_i - this.node.edges.length];
-    }
-    getEdge() {
-        var e = this.getEdgeOrBackedge();
-        return e? e.getEdge(): null;
+            this.node.edges[edge_i].forwardEdge:
+            this.node.backedges[edge_i - this.node.edges.length].backEdge;
     }
     setNode(node) {
         this.node = node;
@@ -2006,12 +2008,20 @@ class MapMenu extends Menu {
     }
     keyDown(keyCode) {
         if(keyCode === KEY_U) {
-            var edge = this.getEdgeOrBackedge();
+            var edge = this.getEdge();
             if(edge) this.setNode(edge.getNode1());
         } else if(keyCode === KEY_L) {
             this.edge_i--;
         } else if(keyCode === KEY_R) {
             this.edge_i++;
+        } else if(keyCode === KEY_ENTER) {
+            var progress = this.game.progress;
+            if(
+                progress.node === this.node &&
+                (!progress.edge || progress.edgeDist)
+            ) {
+                progress.setEdge(this.getEdge());
+            }
         }
     }
     render() {
@@ -2050,10 +2060,12 @@ class MapMenu extends Menu {
                 var strokeStyle = edge.strokeStyle;
                 var lineWidth = 1;
 
-                if(edge === progress.edge) {
+                if(progress.edge && edge === progress.edge.edge) {
                     lineWidth += 2;
                 }
-                if(edge === this.getEdge()) {
+
+                var thisEdge = this.getEdge();
+                if(thisEdge && edge === thisEdge.edge) {
                     strokeStyle = '#fff';
                 }
 
@@ -2144,7 +2156,7 @@ class FighterShip extends Ship {
     reverseSpeed = 1.25;
     velmul = .95;
     rotspeed = Math.PI / 25;
-    rotmul = .5;
+    rotmul = .45;
 
     shotClass = {
         x: DoubleShot,
@@ -2242,10 +2254,10 @@ class AssaultShip extends Ship {
     thrustSpeed = 1.25;
     reverseSpeed = .5;
     velmul = .95;
-    rotspeed = Math.PI / 34;
+    rotspeed = Math.PI / 26;
     rotmul = .65;
 
-    static maxhp = 200;
+    static maxhp = 230;
 
     shotClass = {
         x: TripleShot,
@@ -2270,7 +2282,7 @@ class TorchShip extends Ship {
     rotspeed = Math.PI / 30;
     rotmul = .7;
 
-    static maxhp = 110;
+    static maxhp = 80;
 
     shotClass = {
         x: FlameShot,
@@ -2300,7 +2312,7 @@ class TurretShip extends Ship {
     rotspeed = Math.PI / 40;
     rotmul = .7;
 
-    static maxhp = 60;
+    static maxhp = 180;
 
     shotClass = {
         x: QuadrupleShot,
@@ -2339,11 +2351,11 @@ class FlagShip extends Ship {
     rotmul = .5;
 
     shotClass = {
-        x: null,
+        x: SingleShot,
         y: MissileShot,
     };
 
-    static maxhp = 150;
+    static maxhp = 175;
 
     static max_turret_cooldown = 100;
     static max_turrets = 2;
@@ -2375,6 +2387,7 @@ class FlagShip extends Ship {
     }
     addTurret() {
         var turret = this.field.addShip(TurretShip);
+        turret.hp = turret.maxhp = 60;
         turret.setTeam(this.team);
         turret.pos.copy(this.pos)
             .addSpeed(this.radius + turret.radius, this.rot);
@@ -2397,7 +2410,7 @@ class FlagShip extends Ship {
     step() {
         super.step();
         for(var turret of this.turrets) {
-            for(var keyname of 'x') {
+            for(var keyname of 'xy') {
                 var key = this.keys[keyname];
                 turret.keys[keyname].copy(key);
             }
@@ -2434,7 +2447,7 @@ class MoleShip extends Ship {
     reverseSpeed = 1.15;
     velmul = .95;
     rotspeed = Math.PI / 30;
-    rotmul = .7;
+    rotmul = .6;
 
     static maxhp = 60;
 
@@ -2581,7 +2594,9 @@ class ChomperShip extends Ship {
     rotspeed = Math.PI / 30;
     rotmul = .65;
 
-    static maxhp = 300;
+    addhp = 1 / 10;
+
+    static maxhp = 250;
 
     shotClass = {
         x: ChompShot,
@@ -2722,6 +2737,7 @@ class SingleShot extends Shot {
 
 class ShortSingleShot extends SingleShot {
     static initialSpeed = 17;
+    static cooldown = 3;
 }
 
 class RapidSingleShot extends SingleShot {
@@ -2754,7 +2770,7 @@ class TripleShot extends SingleShot {
     static serialShots = 1;
     static initialRotVariance = Math.PI / 13;
     static serialRotVariance = 0;
-    static cooldown = 8;
+    static cooldown = 7;
 }
 
 class QuadrupleShot extends SingleShot {
@@ -2896,7 +2912,7 @@ class MineShot extends Shot {
     static initialSpeed = 0;
     velmul = .9;
 
-    hitDamage = 10;
+    hitDamage = 5;
 
     maxAge = 300;
     static cooldown = 32;
@@ -2977,6 +2993,10 @@ class Rock extends Entity {
         this.vel.setSpeed(speed, Random.randRotation());
 
         this.rot_vel = Random.randNumber(-.5, .5) * Math.PI / 40;
+    }
+    damage(hp) {
+        if(this.mole) hp /= 2;
+        super.damage(hp);
     }
     remove() {
         if(this.mole) this.mole.exitRock();
