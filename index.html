@@ -2105,7 +2105,7 @@ class ThrustEffect extends Effect {
     radius = 5 * RADIUSMUL;
     shouldRenderTrail = true;
     trailEnd = .3;
-    trailStrokeStyle = 'rgba(0,255,255,.5)';
+    trailStrokeStyle = 'rgba(0,255,255,.7)';
     trailLineWidth = 3;
     maxAge = 20;
 }
@@ -2118,7 +2118,8 @@ class SparkEffect extends Effect {
     radius = 3 * RADIUSMUL;
     shouldRenderTrail = true;
     trailEnd = .3;
-    trailStrokeStyle = 'rgba(255,255,0,.5)';
+    trailStrokeStyle = 'rgba(255,255,0,.7)';
+    trailLineWidth = 3;
     velmul = .95;
     maxAge = 20;
 }
@@ -2158,6 +2159,8 @@ class FighterShip extends Ship {
     rotspeed = Math.PI / 25;
     rotmul = .45;
 
+    static maxhp = 100;
+
     shotClass = {
         x: DoubleShot,
         y: DoubleMissileShot,
@@ -2180,7 +2183,7 @@ class FighterShip extends Ship {
 class ScoutShip extends Ship {
     radius = 6 * RADIUSMUL;
 
-    static maxhp = 65;
+    static maxhp = 100;
     wingsOut = true;
 
     shotClassWingsOut = {
@@ -2236,16 +2239,13 @@ class ScoutShip extends Ship {
             this.shotClass = this.shotClassWingsIn;
         }
     }
-    fire(keyname) {
-        if(keyname === 'y') {
-            this.wingsOut = !this.wingsOut;
+    step() {
+        var wingsOut = !this.keys.y.wasDown;
+        if(wingsOut != this.wingsOut) {
+            this.wingsOut = wingsOut;
             this._updateStats();
-
-            var shotprops = this.shotprops[keyname];
-            shotprops.cooldown += 10;
-        } else {
-            super.fire(keyname);
         }
+        super.step();
     }
 }
 
@@ -2729,8 +2729,10 @@ class SingleShot extends Shot {
     radius = 3 * RADIUSMUL;
     velmul = .95;
     static initialSpeed = 23;
+    hitDamage = 10;
     hitDamageAgeMul = .95;
     shouldRenderTrail = true;
+    static cooldown = 4;
     maxAge = 40;
     fadeWithAge = true;
 }
@@ -2741,8 +2743,10 @@ class ShortSingleShot extends SingleShot {
 }
 
 class RapidSingleShot extends SingleShot {
+    radius = 4 * RADIUSMUL;
     static initialSpeed = 26;
     hitDamage = 6;
+    hitDamageAgeMul = .98;
     static cooldown = 2;
     hitVelMul = .05;
     trailStrokeStyle = '#aaa';
@@ -2872,15 +2876,17 @@ class QuadrupleMissileShot extends MissileShot {
 }
 
 class FlameShot extends Shot {
-    static randomRotVariance = Math.PI / 12;
+    static randomRotVariance = Math.PI / 20;
     static randomPosRotVariance = Math.PI / 4;
     static randomSpeedVariance = 1.5;
 
+    static initialShots = 2;
+    static initialRotVariance = Math.PI / 9;
     static initialSpeed = 10;
     static initialVelMul = .8;
 
     hitVelMul = 0;
-    hitDamage = 5;
+    hitDamage = 3;
     hitDamageAgeMul = .975;
     hitEffectClass = FlameSmokeEffect;
 
@@ -2912,13 +2918,14 @@ class MineShot extends Shot {
     static initialSpeed = 0;
     velmul = .9;
 
-    hitDamage = 5;
+    hitDamage = 8;
 
     maxAge = 300;
     static cooldown = 32;
 
     picture = Picture.newPolygon(6);
     circleFillStyle = 'rgba(255,180,0,.4)';
+    circleLineWidth = 3;
 
     die() {
         var shots = this.emitShots(FlameShot, 5, {
