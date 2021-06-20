@@ -31,11 +31,19 @@ body {
 * Rammer ship
 * Really big ship (MotherShip) with "gravity" using Entity.magneticField
 * Hunter ship?.. BlasterShot + "wormhole" ability?..
+* Robot Swarm ship
+* Engineer "ship"
+* ShockTroop "ship"
 *
 * TODO:
 *
+* Should be able to aim camera at a player (camera.targetPlayer) so we don't
+* need maps to call setTarget explicitly...
+*
 * When a player loses their ship, reset players' keys (otherwise e.g. they can
 * still be holding Up while you're in the menu choosing ships)
+*
+* ScoutShip: opening/closing wings should have a cooldown
 *
 * Maybe... MapProgress.edge is never null?..
 * So the current thing where you are "at" a node would just be when edgeDist
@@ -43,6 +51,22 @@ body {
 * THIS IS IMPORTANT because otherwise we need to have something which
 * represents "the edge which will become progress.edge next time you
 * warp", which is vaguely obnoxious.
+*
+* How do you choose your next warp destination?..
+* - Could have "warp gates" or whatever floating around, if you hit one you
+*   use its destination instead of the Field's default destination.
+*   - An issue with that is, how do you know how the floaty gates correspond
+*     to Map nodes?
+* - Could have "warp space" Fields, which have no rocks or enemies, just super
+*   fast stars... and "warp gates".
+*   - And the warp key ("W") does nothing in "warp space", because you're
+*     already warping?..
+*   - Anyway, same issue -- how do we label "warp gates" or how do you know
+*     what they correspond to on the Map?
+* - We could bring up the MapMenu when you successfully warp, and let you pick
+*   the warp destination.
+*
+* SPRINGY PHYSICS ON MAP NODES
 *
 ******************************/
 
@@ -409,11 +433,124 @@ class MinMax {
         this.max *= n;
         return this;
     }
+    createInterpolated(other, m) {
+        return new MinMax(
+            linear(this.min, other.min, m),
+            linear(this.max, other.max, m));
+    }
+}
+
+class WeightedArrayEntry {
+    constructor(value, weight) {
+        this.value = value;
+        this.weight = weight;
+    }
+}
+
+class WeightedArray {
+
+    constructor(defaultValue, entries) {
+        defaultValue = getDefault(defaultValue, null);
+        entries = getDefault(entries, []);
+
+        if(!(entries instanceof Array)) {
+            throw new Error('Entries not an instance of Array');
+        }
+        for(var entry of entries) {
+            if(!(entry instanceof WeightedArrayEntry)) {
+                console.log(defaultValue, entries, entry);
+                throw new Error(
+                    'Entry is not an instance of WeightedArrayEntry');
+            }
+        }
+
+        this.defaultValue = defaultValue;
+
+        // entries: Array of WeightedArrayEntry
+        this.entries = entries;
+    }
+    static from(values, defaultValue) {
+        var a = new this(defaultValue);
+        for(var value of values) a.addEntry(value, 1);
+        return a;
+    }
+    static fromEntries(entries, defaultValue) {
+        var a = new this(defaultValue);
+        for(var entry of entries) a.addEntry(entry.value, entry.weight);
+        return a;
+    }
+    addEntry(value, weight) {
+        var entry = new WeightedArrayEntry(value, weight);
+        this.entries.push(entry);
+        return this;
+    }
+    getTotalWeight() {
+        var totalWeight = 0;
+        for(var entry of this.entries) totalWeight += entry.weight;
+        return totalWeight;
+    }
+    normalize(targetTotalWeight) {
+        targetTotalWeight = getDefault(targetTotalWeight, 1);
+
+        var totalWeight = this.getTotalWeight();
+        for(var entry of this.entries) {
+            entry.weight = entry.weight / totalWeight * targetTotalWeight;
+        }
+        return this;
+    }
+    clone() {
+        return WeightedArray.fromEntries(this.entries, this.defaultValue);
+    }
+    getEntry(value) {
+        for(var entry of this.entries) {
+            if(entry.value === value) return entry;
+        }
+        return null;
+    }
+    mul(m) {
+        for(var entry of this.entries) entry.weight *= m;
+    }
+    add(other, m) {
+        // m: number between 0 and 1, used to weight this and other.
+        // That is, if m === 0 then all weights are equal to this's weights.
+        // If m === 1 then all weights are equal to other's weights.
+        // If m === .5 then this and other are equally weighted.
+        m = getDefault(m, .5);
+
+        this.mul(1 - m);
+
+        for(var otherEntry of other.entries) {
+            var thisEntry = this.getEntry(otherEntry.value);
+            if(thisEntry) {
+                thisEntry.weight += otherEntry.weight * m;
+            } else {
+                this.addEntry(otherEntry.value, otherEntry.weight * m);
+            }
+        }
+        return this;
+    }
+    addNormalized(other, m) {
+        this.normalize(other.getTotalWeight());
+        return this.add(other, m);
+    }
+    randValue() {
+        var totalWeight = this.getTotalWeight();
+        var r = Random.randNumber(totalWeight);
+        for(var entry of this.entries) {
+            r -= entry.weight;
+            if(r < 0) return entry.value;
+        }
+
+        // If e.g. this.entries was empty, or totalWeight is 0:
+        return this.defaultValue;
+    }
 }
 
 class FieldTemplate {
     /* Blueprint for creating a Field and populating it with entities (stars,
     rocks, ships, etc). */
+
+    text = null;
 
     width = new MinMax(DEFAULT_FIELD_WIDTH);
     height = new MinMax(DEFAULT_FIELD_HEIGHT);
@@ -427,8 +564,8 @@ class FieldTemplate {
     star_speed = new MinMax(
         DEFAULT_STAR_SPEED - 1.6, DEFAULT_STAR_SPEED + 1.5);
 
-    ship_classes = SHIP_CLASSES;
-    teams = TEAMS;
+    ship_classes = WeightedArray.from(SHIP_CLASSES);
+    teams = WeightedArray.from(TEAMS);
 
     constructor(props) {
         if(props) for(var name in props) {
@@ -438,15 +575,45 @@ class FieldTemplate {
     getSize() {
         return new Point(this.width.getRand(), this.height.getRand());
     }
+    createInterpolated(other, m) {
+        // We create & return a new FieldTemplate whose values are linear
+        // interpolations of those in this and other.
+        // m: number between 0 and 1 (inclusive).
+        // If m is 0, new FieldTemplate's values are exactly this's values.
+        // If m is 1, new FieldTemplate's values are exactly other's values.
+        // If m is .5, new FieldTemplate's values are halfway between this's
+        // and other's values.
+        // ...etc.
+
+        var props = {};
+        for(var name in this) {
+            var thisProp = this[name];
+            var otherProp = other[name];
+            if(thisProp instanceof MinMax) {
+                props[name] = thisProp.createInterpolated(otherProp, m);
+            } else if(thisProp instanceof WeightedArray) {
+                props[name] = thisProp.clone().addNormalized(otherProp, m);
+            } else if(typeof thisProp === 'number') {
+                props[name] = linear(thisProp, otherProp, m);
+            } else if(name === 'text') {
+                // Don't interpolate the text -- only nodes' templates can
+                // have text for now.
+            } else {
+                console.log(this, other);
+                console.log(thisProp, otherProp);
+                throw new Error('Dunno what to do with property: ' + name);
+            }
+        }
+        return new FieldTemplate(props);
+    }
 }
 
 class MapNode {
     /* A node of the graph represented by class Map. */
 
-    constructor(map, template, text) {
+    constructor(map, template) {
         this.map = map;
         this.template = template;
-        this.text = text || null;
         this.edges = [];
         this.backedges = [];
 
@@ -522,8 +689,8 @@ class Map {
         this.startNode = null;
         this.startEdge = null; // DirectedMapEdge
     }
-    addNode(template, text) {
-        var node = new MapNode(this, template, text);
+    addNode(template) {
+        var node = new MapNode(this, template);
         this.nodes.push(node);
         return node;
     }
@@ -536,6 +703,8 @@ class MapProgress {
     /* Represents players' "progress" across a Map.
     For instance, the MapNode at which they are currently located, and
     the MapEdge along which they are travelling (if applicable). */
+
+    template = null;
 
     constructor(map) {
         if(!map.nodes.length) throw new Error('Map has no nodes');
@@ -559,16 +728,10 @@ class MapProgress {
 
         if(map.startEdge) this.setEdge(map.startEdge);
     }
-    getDestination() {
-        return this.edge? this.edge.getNode1(): this.node;
-    }
-    getText() {
-        if(this.edge) return null;
-        return this.node.text;
-    }
     setNode(node) {
         if(this.edge) throw new Error('Busy travelling along an edge');
         this.node = node;
+        this.template = node.template;
     }
     unsetEdge() {
         if(!this.edge) throw new Error('Edge not yet set');
@@ -577,8 +740,8 @@ class MapProgress {
     }
     setEdge(edge) {
         if(this.edge) throw new Error('Edge already set');
-        if(edge.len === 0) {
-            this.setNode(edge.node1);
+        if(edge.getLen() === 0) {
+            this.setNode(edge.getNode1());
             return;
         }
         this.edge = edge;
@@ -587,9 +750,16 @@ class MapProgress {
     proceed() {
         if(!this.edge) return;
         this.edgeDist++;
-        if(this.edgeDist >= this.edge.len) {
-            this.setNode(this.edge.node1);
+        var edgeLen = this.edge.getLen();
+        if(this.edgeDist >= edgeLen) {
+            var node1 = this.edge.getNode1();
             this.unsetEdge();
+            this.setNode(node1);
+        } else {
+            var m = this.edgeDist / edgeLen;
+            var node1 = this.edge.getNode1();
+            this.template = this.node.template.createInterpolated(
+                node1.template, m);
         }
     }
 }
@@ -671,8 +841,8 @@ class Field {
         // Add ships
         for(var i = 0; i < n_ships; i++) {
             var player = this.game.addCPUPlayer();
-            player.setTeam(Random.choice(template.teams));
-            player.createShip(Random.choice(template.ship_classes));
+            player.setTeam(template.teams.randValue());
+            player.createShip(template.ship_classes.randValue());
         }
     }
     addEntityArray() {
@@ -1246,7 +1416,7 @@ class Entity extends Sprite {
 
             this.warping_counter++;
             if(this.warping_counter > WARP_AFTER_STEPS) {
-                this.field.game.warp();
+                this.finishWarp();
             }
         }
 
@@ -1499,6 +1669,16 @@ class Entity extends Sprite {
         this.is_warping = true;
         this.vel.addSpeed(this.thrustSpeed * 5, this.rot);
     }
+    finishWarp() {
+        var progress = this.field.game.progress;
+        if(progress.edge) {
+            progress.proceed();
+            this.field.game.warp();
+        } else {
+            this.die();
+            this.field.game.setMenu(WarpMapMenu);
+        }
+    }
     abortWarp() {
         var warp_damage = 10;
         this.damage(warp_damage);
@@ -1674,9 +1854,7 @@ class Game {
         // NOTE: need to set this.cpus before calling the Field constructor
         this.cpus = [];
 
-        // destination: MapNode or MapEdge
-        var destination = this.progress.getDestination();
-        var template = destination.template;
+        var template = this.progress.template;
         var size = template.getSize();
 
         // NOTE: field.populate needs to be a separate method from
@@ -1690,17 +1868,8 @@ class Game {
     warp() {
         /* Warp to the next Field */
 
-        this.progress.proceed();
-
-        // Figure out which player's ship our camera is targeting.
-        // This is a bit of a hack...
         var targetPlayer = null;
-        for(var player of this.players) {
-            if(player.entity === this.camera.target) {
-                targetPlayer = player;
-                break;
-            }
-        }
+        if(this.camera.target) targetPlayer = this.camera.target.getPlayer();
 
         this.camera.unsetTarget();
 
@@ -1726,13 +1895,13 @@ class Game {
         if(this.menu) {
             this.menu.keyDown(keyCode);
         } else if(keyCode === KEY_ESCAPE) {
-            this.setTitleMenu();
+            this.setMenu(TitleMenu);
         } else if(keyCode === KEY_TAB) {
-            this.setMapMenu();
+            this.setMenu(TabMapMenu);
         } else if(keyCode === KEY_WARP) {
             // HACK!
             var ship = this.camera.target;
-            if(ship && !ship.is_warping) {
+            if(ship && !ship.is_warping && !ship.rock) {
                 ship.beginWarp();
             }
         } else {
@@ -1741,7 +1910,7 @@ class Game {
         }
     }
     keyUp(keyCode) {
-        if(this.menu instanceof MapMenu && keyCode === KEY_TAB) {
+        if(this.menu instanceof TabMapMenu && keyCode === KEY_TAB) {
             this.unsetMenu();
         } else if(this.menu) {
             this.menu.keyUp(keyCode);
@@ -1762,12 +1931,6 @@ class Game {
         if(!this.menu) return;
         this.menu.cleanup();
         this.menu = null;
-    }
-    setTitleMenu() {
-        this.setMenu(TitleMenu);
-    }
-    setMapMenu() {
-        this.setMenu(MapMenu);
     }
     addShip(cls) {
         return this.field.addShip(cls);
@@ -1799,7 +1962,7 @@ class Game {
         if(this.menu) {
             this.menu.render();
         } else {
-            var text = this.progress.getDestination().text;
+            var text = this.progress.template.text;
             if(text && !HIDE_TEXT) text.render(canvas);
         }
         if(this.camera.target) this.renderEntityStats(this.camera.target);
@@ -2001,21 +2164,10 @@ class MapMenu extends Menu {
         this.edge_i = 0;
     }
     keyDown(keyCode) {
-        if(keyCode === KEY_U) {
-            var edge = this.getEdge();
-            if(edge) this.setNode(edge.getNode1());
-        } else if(keyCode === KEY_L) {
+        if(keyCode === KEY_L) {
             this.edge_i--;
         } else if(keyCode === KEY_R) {
             this.edge_i++;
-        } else if(keyCode === KEY_ENTER) {
-            var progress = this.game.progress;
-            if(
-                progress.node === this.node &&
-                (!progress.edge || progress.edgeDist)
-            ) {
-                progress.setEdge(this.getEdge());
-            }
         }
     }
     render() {
@@ -2076,6 +2228,38 @@ class MapMenu extends Menu {
     }
 }
 
+class TabMapMenu extends MapMenu {
+    keyDown(keyCode) {
+        if(keyCode === KEY_U) {
+            var edge = this.getEdge();
+            if(edge) this.setNode(edge.getNode1());
+        } else {
+            super.keyDown(keyCode);
+        }
+    }
+}
+
+class WarpMapMenu extends MapMenu {
+    keyDown(keyCode) {
+        if(keyCode === KEY_ENTER) {
+            var progress = this.game.progress;
+            progress.setEdge(this.getEdge());
+
+            this.game.warp();
+
+            // HACK: we assume first player is who camera should be targeting.
+            // The reason we have to do this is that finishWarp currently kills
+            // the ship, so game.camera.target gets set to null, so game.warp()
+            // has no way to know what the camera should be pointed at.
+            this.game.camera.setTarget(this.game.players[0].entity);
+
+            this.game.unsetMenu();
+        } else {
+            super.keyDown(keyCode);
+        }
+    }
+}
+
 class Effect extends Entity {
     fadeWithAge = true;
 }
@@ -2091,8 +2275,8 @@ class SmokeEffect extends Effect {
 }
 
 class FlameSmokeEffect extends SmokeEffect {
-    radius = 5 * RADIUSMUL;
-    circleFillStyle = 'rgba(200,150,100,.2)';
+    radius = 4 * RADIUSMUL;
+    circleFillStyle = 'rgba(75,75,50,.5)';
 }
 
 class ThrustEffect extends Effect {
@@ -3124,15 +3308,16 @@ var defaultMap = (function() {
     var map = new Map();
 
     var tutorial1 = map.addNode(
-        new FieldTemplate(),
-        new Text('Controls', [
-            'Left/right: turn left/right',
-            'Up/down   : thrust/reverse',
-            'Spacebar  : fire weapon / use ability #1',
-            'Shift     : fire weapon / use ability #2',
-            'Escape    : open menu',
-            'W         : attempt to warp to next area',
-        ]),
+        new FieldTemplate({
+            text: new Text('Controls', [
+                'Left/right: turn left/right',
+                'Up/down   : thrust/reverse',
+                'Spacebar  : fire weapon / use ability #1',
+                'Shift     : fire weapon / use ability #2',
+                'Escape    : open menu',
+                'W         : attempt to warp to next area',
+            ]),
+        })
     );
 
     var basicTemplate = new FieldTemplate();
@@ -3160,7 +3345,7 @@ game.mapKey(player.keys.r, KEY_R);
 game.mapKey(player.keys.x, KEY_SPACE);
 game.mapKey(player.keys.y, KEY_SHIFT);
 
-game.setTitleMenu();
+game.setMenu(TitleMenu);
 
 game.play();
 canvas.style.border = 'none';
