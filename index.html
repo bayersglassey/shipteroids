@@ -45,28 +45,19 @@ body {
 *
 * ScoutShip: opening/closing wings should have a cooldown
 *
-* Maybe... MapProgress.edge is never null?..
-* So the current thing where you are "at" a node would just be when edgeDist
-* is 0.
-* THIS IS IMPORTANT because otherwise we need to have something which
-* represents "the edge which will become progress.edge next time you
-* warp", which is vaguely obnoxious.
-*
-* How do you choose your next warp destination?..
-* - Could have "warp gates" or whatever floating around, if you hit one you
-*   use its destination instead of the Field's default destination.
-*   - An issue with that is, how do you know how the floaty gates correspond
-*     to Map nodes?
-* - Could have "warp space" Fields, which have no rocks or enemies, just super
-*   fast stars... and "warp gates".
-*   - And the warp key ("W") does nothing in "warp space", because you're
-*     already warping?..
-*   - Anyway, same issue -- how do we label "warp gates" or how do you know
-*     what they correspond to on the Map?
-* - We could bring up the MapMenu when you successfully warp, and let you pick
-*   the warp destination.
-*
 * SPRINGY PHYSICS ON MAP NODES
+*
+* Currently WarpMapMenu comes up when you arrive at a node; it would make
+* more sense for it to come up when you *leave* the node.
+* Although then... either it would choose a "default" next edge for you,
+* or we would need to go back to having progress.edge allowed to be null.
+*
+* FieldTemplate's ship_classes and teams should be combined...
+* E.g. I want to say something like:
+*   ship_classes = WeightedArray()
+*       .addEntry({cls: TorchShip, team: RED_TEAM})
+* ...whereas currently, you could end up with e.g. blue Torches when
+* interpolating between nodes.
 *
 ******************************/
 
@@ -125,20 +116,19 @@ var KEY_ESCAPE = 27;
 var KEY_WARP = 87; // 'W'
 var KEY_TAB = 9;
 
-var TEAMS = [
-    {
-        strokeStyle: '#0f0',
-    },
-    {
-        strokeStyle: '#00f',
-    },
-    {
-        strokeStyle: '#f00',
-    },
-    {
-        strokeStyle: '#ff0',
-    },
-];
+class Team {
+    constructor(name, color) {
+        this.name = name;
+        this.color = color;
+    }
+}
+
+// teams
+var GREEN_TEAM = new Team('Green', '#0f0');
+var RED_TEAM = new Team('Red', '#f33');
+var BLUE_TEAM = new Team('Blue', '#33f');
+var YELLOW_TEAM = new Team('Yellow', '#ff0');
+var TEAMS = [GREEN_TEAM, RED_TEAM, BLUE_TEAM, YELLOW_TEAM];
 
 
 function linear(x0, x1, n) {
@@ -416,6 +406,9 @@ class Point {
 }
 
 class MinMax {
+    /* Represents a range of numbers, min..max.
+    Used for e.g. generating random values within a range. */
+
     constructor(min, max) {
         this.min = getDefault(min, 0);
         this.max = getDefault(max, this.min);
@@ -441,6 +434,8 @@ class MinMax {
 }
 
 class WeightedArrayEntry {
+    /* An entry of a WeightedArray */
+
     constructor(value, weight) {
         this.value = value;
         this.weight = weight;
@@ -448,6 +443,8 @@ class WeightedArrayEntry {
 }
 
 class WeightedArray {
+    /* An Array whose values each have a "weight", used when e.g.
+    choosing a value at random. */
 
     constructor(defaultValue, entries) {
         defaultValue = getDefault(defaultValue, null);
@@ -480,6 +477,7 @@ class WeightedArray {
         return a;
     }
     addEntry(value, weight) {
+        weight = getDefault(weight, 1);
         var entry = new WeightedArrayEntry(value, weight);
         this.entries.push(entry);
         return this;
@@ -596,8 +594,12 @@ class FieldTemplate {
             } else if(typeof thisProp === 'number') {
                 props[name] = linear(thisProp, otherProp, m);
             } else if(name === 'text') {
-                // Don't interpolate the text -- only nodes' templates can
-                // have text for now.
+                if(m === 0) props[name] = thisProp;
+                else if(m === 1) props[name] = otherProp;
+                else if(thisProp === otherProp) props[name] = thisProp;
+                else {
+                    // Don't bother trying to "interpolate" text.
+                }
             } else {
                 console.log(this, other);
                 console.log(thisProp, otherProp);
@@ -611,9 +613,10 @@ class FieldTemplate {
 class MapNode {
     /* A node of the graph represented by class Map. */
 
-    constructor(map, template) {
+    constructor(map, template, title) {
         this.map = map;
         this.template = template;
+        this.title = title;
         this.edges = [];
         this.backedges = [];
 
@@ -635,6 +638,26 @@ class MapNode {
         other.backedges.push(edge);
         return edge;
     }
+    numEdges() {
+        return this.edges.length + this.backedges.length;
+    }
+    getEdgeIndex(edge) {
+        var i = this.edges.indexOf(edge.edge);
+        if(i < 0) {
+            i = this.backedges.indexOf(edge.edge);
+            if(i < 0) {
+                console.log(this, edge);
+                throw new Error('Couldn\'t find edge');
+            }
+            i += this.edges.length;
+        }
+        return i;
+    }
+    getEdge(i) {
+        return (i < this.edges.length)?
+            this.edges[i].forwardEdge:
+            this.backedges[i - this.edges.length].backEdge;
+    }
     step() {
         this.pos.add(this.vel);
     }
@@ -649,7 +672,7 @@ class MapEdge {
     constructor(node0, node1, len) {
         this.node0 = node0;
         this.node1 = node1;
-        this.len = getDefault(len, 0);
+        this.len = getDefault(len, 1);
 
         this.forwardEdge = new DirectedMapEdge(this, false);
         this.backEdge = new DirectedMapEdge(this, true);
@@ -686,11 +709,14 @@ class Map {
 
     constructor() {
         this.nodes = [];
-        this.startNode = null;
         this.startEdge = null; // DirectedMapEdge
     }
-    addNode(template) {
-        var node = new MapNode(this, template);
+    getStartEdge() {
+        if(this.startEdge) return this.startEdge;
+        return this.nodes[0].getEdge(0);
+    }
+    addNode(template, title) {
+        var node = new MapNode(this, template, title);
         this.nodes.push(node);
         return node;
     }
@@ -709,58 +735,42 @@ class MapProgress {
     constructor(map) {
         if(!map.nodes.length) throw new Error('Map has no nodes');
         this.map = map;
+        this.edge = map.getStartEdge();
 
-        // node is never null
-        this.node = null;
-
-        // edge: a DirectedMapEdge
-        // edge is null if we're at a node; edge is not null when we're
-        // travelling from this.node to this.edge.getNode1()
-        this.edge = null;
-
-        // edgeDist: how far we've travelled along this.edge (if it's not
-        // null).
-        // Once this.edgeDist reaches this.edge.getLen(), this.node is set
-        // to this.edge.getNode1(), and this.edgeDist is set to 0.
+        // edgeDist: how far we've travelled along this.edge.
+        // It should always be the case that:
+        //
+        //   edgeDist >= 0 && edgeDist < edge.getLen()
+        //
         this.edgeDist = 0;
 
-        this.setNode(map.startNode || map.nodes[0]);
-
-        if(map.startEdge) this.setEdge(map.startEdge);
+        this.setTemplate();
     }
-    setNode(node) {
-        if(this.edge) throw new Error('Busy travelling along an edge');
-        this.node = node;
-        this.template = node.template;
-    }
-    unsetEdge() {
-        if(!this.edge) throw new Error('Edge not yet set');
-        this.edge = null;
-        this.edgeDist = 0;
+    canProceed() {
+        return (this.edgeDist < this.edge.getLen() - 1);
     }
     setEdge(edge) {
-        if(this.edge) throw new Error('Edge already set');
-        if(edge.getLen() === 0) {
-            this.setNode(edge.getNode1());
-            return;
+        if(this.canProceed()) {
+            throw new Error('Can\'t set edge yet, must proceed first');
         }
         this.edge = edge;
         this.edgeDist = 0;
+        this.setTemplate();
     }
     proceed() {
-        if(!this.edge) return;
-        this.edgeDist++;
-        var edgeLen = this.edge.getLen();
-        if(this.edgeDist >= edgeLen) {
-            var node1 = this.edge.getNode1();
-            this.unsetEdge();
-            this.setNode(node1);
-        } else {
-            var m = this.edgeDist / edgeLen;
-            var node1 = this.edge.getNode1();
-            this.template = this.node.template.createInterpolated(
-                node1.template, m);
+        if(!this.canProceed()) {
+            throw new Error('Can\'t proceed yet, must set edge first');
         }
+
+        this.edgeDist++;
+        this.setTemplate();
+    }
+    setTemplate() {
+        var m = this.edgeDist / this.edge.getLen();
+        var node0 = this.edge.getNode0();
+        var node1 = this.edge.getNode1();
+        this.template = node0.template
+            .createInterpolated(node1.template, m);
     }
 }
 
@@ -840,9 +850,15 @@ class Field {
 
         // Add ships
         for(var i = 0; i < n_ships; i++) {
+            var team = template.teams.randValue();
+            if(!team) continue;
+
+            var cls = template.ship_classes.randValue();
+            if(!cls) continue;
+
             var player = this.game.addCPUPlayer();
-            player.setTeam(template.teams.randValue());
-            player.createShip(template.ship_classes.randValue());
+            player.setTeam(team);
+            player.createShip(cls);
         }
     }
     addEntityArray() {
@@ -1344,7 +1360,7 @@ class Entity extends Sprite {
 
         this.keys = Key.createKeys();
 
-        this.setTeam(TEAMS[0]);
+        this.setTeam(GREEN_TEAM);
 
         this.age = 0;
         this._shouldRemove = false;
@@ -1358,8 +1374,8 @@ class Entity extends Sprite {
     setTeam(team) {
         this.team = team;
         if(this.inheritTeamColor) {
-            this.lineStrokeStyle = team.strokeStyle;
-            this.circleStrokeStyle = team.strokeStyle;
+            this.lineStrokeStyle = team.color;
+            this.circleStrokeStyle = team.color;
         }
     }
     heal(addhp) {
@@ -1671,7 +1687,7 @@ class Entity extends Sprite {
     }
     finishWarp() {
         var progress = this.field.game.progress;
-        if(progress.edge) {
+        if(progress.canProceed()) {
             progress.proceed();
             this.field.game.warp();
         } else {
@@ -1776,7 +1792,7 @@ class Player {
     constructor(game) {
         this.game = game;
         this.entity = null;
-        this.team = TEAMS[0];
+        this.team = GREEN_TEAM;
         this.keys = Key.createKeys();
     }
     setTeam(team) {
@@ -2147,27 +2163,64 @@ class MapMenu extends Menu {
     node = null;
     edge_i = 0;
 
+    // edge: calculated by updateEdge() based on edge_i
+    edge = null;
+
+    // text: calculated by updateEdge()
+    text = null;
+
     constructor(game) {
         super(game);
-        this.setNode(game.progress.node);
+        this.initNode();
     }
-    getEdge() {
-        var n_edges = this.node.edges.length + this.node.backedges.length;
-        if(!n_edges) return null;
+    initNode() {
+        // Calls this.setNode.
+        // May be overridden by subclasses (who must still call
+        // this.setNode).
+
+        var edge = game.progress.edge;
+        var node = edge.getNode0();
+        var edge_i = node.getEdgeIndex(edge);
+        this.setNode(node, edge_i);
+    }
+    updateEdge() {
+        var n_edges = this.node.numEdges();
         var edge_i = modulo(this.edge_i, n_edges);
-        return (edge_i < this.node.edges.length)?
-            this.node.edges[edge_i].forwardEdge:
-            this.node.backedges[edge_i - this.node.edges.length].backEdge;
+        this.edge = this.node.getEdge(edge_i);
+        this.updateText();
     }
-    setNode(node) {
+    updateText() {
+        var title = this.node.title;
+
+        var progress = this.game.progress;
+        var node1 = this.edge.getNode1();
+        if(this.edge === progress.edge) {
+            var lines = [
+                'Travelling to: ' + node1.title,
+                'Progress: ' + progress.edgeDist
+                    + ' / ' + this.edge.getLen(),
+            ];
+        } else {
+            var lines = [
+                'Towards: ' + node1.title,
+                'Distance: ' + this.edge.getLen(),
+            ];
+        }
+
+        this.text = new Text(title, lines);
+    }
+    setNode(node, edge_i) {
         this.node = node;
-        this.edge_i = 0;
+        this.edge_i = getDefault(edge_i, 0);
+        this.updateEdge();
     }
     keyDown(keyCode) {
         if(keyCode === KEY_L) {
             this.edge_i--;
+            this.updateEdge();
         } else if(keyCode === KEY_R) {
             this.edge_i++;
+            this.updateEdge();
         }
     }
     render() {
@@ -2175,6 +2228,8 @@ class MapMenu extends Menu {
         var ctx = canvas.getContext('2d');
         var x0 = canvas.width / 2 - this.node.pos.x;
         var y0 = canvas.height / 2 - this.node.pos.y;
+
+        this.text.render(this.game.canvas);
 
         var progress = this.game.progress;
         var map = progress.map;
@@ -2186,12 +2241,9 @@ class MapMenu extends Menu {
             var fillStyle = node.fillStyle;
             var lineWidth = 2;
 
-            if(node === progress.node) {
-                radius += 4;
-                lineWidth += 2;
-            }
             if(node === this.node) {
                 strokeStyle = '#fff';
+                lineWidth += 2;
             }
 
             ctx.strokeStyle = strokeStyle;
@@ -2206,13 +2258,9 @@ class MapMenu extends Menu {
                 var strokeStyle = edge.strokeStyle;
                 var lineWidth = 1;
 
-                if(progress.edge && edge === progress.edge.edge) {
-                    lineWidth += 2;
-                }
-
-                var thisEdge = this.getEdge();
-                if(thisEdge && edge === thisEdge.edge) {
+                if(edge === this.edge.edge) {
                     strokeStyle = '#fff';
+                    lineWidth += 2;
                 }
 
                 ctx.lineWidth = lineWidth;
@@ -2231,8 +2279,7 @@ class MapMenu extends Menu {
 class TabMapMenu extends MapMenu {
     keyDown(keyCode) {
         if(keyCode === KEY_U) {
-            var edge = this.getEdge();
-            if(edge) this.setNode(edge.getNode1());
+            this.setNode(this.edge.getNode1());
         } else {
             super.keyDown(keyCode);
         }
@@ -2240,10 +2287,18 @@ class TabMapMenu extends MapMenu {
 }
 
 class WarpMapMenu extends MapMenu {
+    initNode() {
+        // Overriding MapMenu.initNode (to use edge.getNode1() instead
+        // of edge.getNode0())
+
+        var edge = game.progress.edge;
+        var node = edge.getNode1();
+        this.setNode(node);
+    }
     keyDown(keyCode) {
         if(keyCode === KEY_ENTER) {
             var progress = this.game.progress;
-            progress.setEdge(this.getEdge());
+            progress.setEdge(this.edge);
 
             this.game.warp();
 
@@ -2703,7 +2758,12 @@ class MoleShip extends Ship {
         if(keyname === 'y') {
             var shotprops = this.shotprops[keyname];
             if(this.rock) {
+
+                // TODO: either add to this.pos instead of this.addpos,
+                // or add some kind of marker to this, so that it doesn't
+                // collide with rocks for the rest of this frame?..
                 this.addpos.addSpeed(this.rock.radius * .8, this.rot);
+
                 this.vel.addSpeed(this.rock.radius * .2, this.rot);
                 this.exitRock();
                 shotprops.cooldown += 10;
@@ -3307,32 +3367,54 @@ var canvas = document.getElementById('canvas');
 var defaultMap = (function() {
     var map = new Map();
 
-    var tutorial1 = map.addNode(
-        new FieldTemplate({
-            text: new Text('Controls', [
-                'Left/right: turn left/right',
-                'Up/down   : thrust/reverse',
-                'Spacebar  : fire weapon / use ability #1',
-                'Shift     : fire weapon / use ability #2',
-                'Escape    : open menu',
-                'W         : attempt to warp to next area',
-            ]),
-        })
-    );
+    var tutorialTemplate = new FieldTemplate({
+        text: new Text('Controls', [
+            'Left/right: turn left/right',
+            'Up/down   : thrust/reverse',
+            'Spacebar  : fire weapon / use ability #1',
+            'Shift     : fire weapon / use ability #2',
+            'Escape    : open menu',
+            'W         : attempt to warp to next area',
+        ]),
+        ship_classes: new WeightedArray(),
+    });
+    var tutorial1 = map.addNode(tutorialTemplate, 'Tutorial');
 
-    var basicTemplate = new FieldTemplate();
-    var fireTemplate = new FieldTemplate();
-    var rockTemplate = new FieldTemplate();
+    var basicTemplate = new FieldTemplate({
+        ship_classes: new WeightedArray()
+            .addEntry(ScoutShip)
+            .addEntry(AssaultShip),
+        teams: new WeightedArray()
+            .addEntry(GREEN_TEAM)
+            .addEntry(BLUE_TEAM),
+    });
+    var fireTemplate = new FieldTemplate({
+        height: new MinMax(DEFAULT_FIELD_HEIGHT * 2),
+        rocks_per: new MinMax(DEFAULT_ROCKS_PER * 30),
+        rock_radius: new MinMax(5, 15).mul(RADIUSMUL),
+        ship_classes: new WeightedArray().addEntry(TorchShip),
+        teams: new WeightedArray().addEntry(RED_TEAM),
+    });
+    var rockTemplate = new FieldTemplate({
+        width: new MinMax(DEFAULT_FIELD_WIDTH * 2),
+        rocks_per: new MinMax(DEFAULT_ROCKS_PER * 10),
+        rock_radius: new MinMax(30, 40).mul(RADIUSMUL),
+        ship_classes: new WeightedArray()
+            .addEntry(MoleShip)
+            .addEntry(ChomperShip),
+        teams: new WeightedArray()
+            .addEntry(BLUE_TEAM)
+            .addEntry(YELLOW_TEAM),
+    });
 
-    var basicNode = map.addNode(basicTemplate);
-    var fireNode = map.addNode(fireTemplate);
-    var rockNode = map.addNode(rockTemplate);
+    var basicNode = map.addNode(basicTemplate, 'Basic');
+    var fireNode = map.addNode(fireTemplate, 'Fire');
+    var rockNode = map.addNode(rockTemplate, 'Rock');
 
     tutorial1.addEdge(basicNode);
-    basicNode.addEdge(fireNode, 4);
-    basicNode.addEdge(rockNode, 5);
+    basicNode.addEdge(fireNode, 2);
+    basicNode.addEdge(rockNode, 3);
 
-    map.startNode = tutorial1;
     return map;
 })();
 var game = new Game(canvas, new MapProgress(defaultMap));
