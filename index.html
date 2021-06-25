@@ -52,13 +52,6 @@ body {
 * Although then... either it would choose a "default" next edge for you,
 * or we would need to go back to having progress.edge allowed to be null.
 *
-* FieldTemplate's ship_classes and teams should be combined...
-* E.g. I want to say something like:
-*   ship_classes = WeightedArray()
-*       .addEntry({cls: TorchShip, team: RED_TEAM})
-* ...whereas currently, you could end up with e.g. blue Torches when
-* interpolating between nodes.
-*
 ******************************/
 
 
@@ -544,6 +537,14 @@ class WeightedArray {
     }
 }
 
+class ShipTemplate {
+    /* Blueprint for creating a Ship */
+
+    constructor(cls, team) {
+        this.cls = cls;
+        this.team = team;
+    }
+}
 class FieldTemplate {
     /* Blueprint for creating a Field and populating it with entities (stars,
     rocks, ships, etc). */
@@ -562,8 +563,7 @@ class FieldTemplate {
     star_speed = new MinMax(
         DEFAULT_STAR_SPEED - 1.6, DEFAULT_STAR_SPEED + 1.5);
 
-    ship_classes = WeightedArray.from(SHIP_CLASSES);
-    teams = WeightedArray.from(TEAMS);
+    ships = new WeightedArray();
 
     constructor(props) {
         if(props) for(var name in props) {
@@ -912,15 +912,12 @@ class Field {
 
         // Add ships
         for(var i = 0; i < n_ships; i++) {
-            var team = template.teams.randValue();
-            if(!team) continue;
-
-            var cls = template.ship_classes.randValue();
-            if(!cls) continue;
+            var ship_template = template.ships.randValue();
+            if(!ship_template) continue;
 
             var player = this.game.addCPUPlayer();
-            player.setTeam(team);
-            player.createShip(cls);
+            player.setTeam(ship_template.team);
+            player.createShip(ship_template.cls);
         }
     }
     addEntityArray() {
@@ -3443,35 +3440,31 @@ var defaultMap = (function() {
             'Escape    : open menu',
             'W         : attempt to warp to next area',
         ]),
-        ship_classes: new WeightedArray(),
     });
     var tutorial1 = map.addNode(tutorialTemplate, 'Tutorial');
 
     var basicTemplate = new FieldTemplate({
-        ship_classes: new WeightedArray()
-            .addEntry(ScoutShip)
-            .addEntry(AssaultShip),
-        teams: new WeightedArray()
-            .addEntry(GREEN_TEAM)
-            .addEntry(BLUE_TEAM),
+        ships: new WeightedArray()
+            .addEntry(new ShipTemplate(FighterShip, GREEN_TEAM))
+            .addEntry(new ShipTemplate(ScoutShip, BLUE_TEAM))
+            .addEntry(new ShipTemplate(AssaultShip, BLUE_TEAM)),
     });
     var fireTemplate = new FieldTemplate({
         height: new MinMax(DEFAULT_FIELD_HEIGHT * 2),
         rocks_per: new MinMax(DEFAULT_ROCKS_PER * 30),
         rock_radius: new MinMax(5, 15).mul(RADIUSMUL),
-        ship_classes: new WeightedArray().addEntry(TorchShip),
-        teams: new WeightedArray().addEntry(RED_TEAM),
+        ships: new WeightedArray()
+            .addEntry(new ShipTemplate(TorchShip, RED_TEAM)),
     });
     var rockTemplate = new FieldTemplate({
         width: new MinMax(DEFAULT_FIELD_WIDTH * 2),
         rocks_per: new MinMax(DEFAULT_ROCKS_PER * 10),
         rock_radius: new MinMax(30, 40).mul(RADIUSMUL),
-        ship_classes: new WeightedArray()
-            .addEntry(MoleShip)
-            .addEntry(ChomperShip),
-        teams: new WeightedArray()
-            .addEntry(BLUE_TEAM)
-            .addEntry(YELLOW_TEAM),
+        ships: new WeightedArray()
+            .addEntry(new ShipTemplate(MoleShip, GREEN_TEAM))
+            .addEntry(new ShipTemplate(MoleShip, BLUE_TEAM))
+            .addEntry(new ShipTemplate(MoleShip, YELLOW_TEAM))
+            .addEntry(new ShipTemplate(ChomperShip, RED_TEAM)),
     });
 
     var basicNode = map.addNode(basicTemplate, 'Basic');
