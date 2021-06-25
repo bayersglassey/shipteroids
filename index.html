@@ -721,6 +721,68 @@ class Map {
         return node;
     }
     step() {
+        for(var i = 0; i < this.nodes.length; i++) {
+            var node = this.nodes[i];
+
+            var velmul = .95;
+            node.vel.mul(velmul);
+
+            // Nodes repel
+            for(var j = i + 1; j < this.nodes.length; j++) {
+                var other = this.nodes[j];
+                var dx = other.pos.x - node.pos.x;
+                var dy = other.pos.y - node.pos.y;
+                var dist = node.pos.dist(other.pos);
+
+                // Just say no to dividing by zero!
+                if(!dist) {
+                    dist = .01;
+                    var p = new Point().addSpeed(dist, Random.randRotation());
+                    dx += p.x;
+                    dy += p.y;
+                }
+
+                var mul = 5;
+                var m = -mul / (dist * dist);
+                node.vel.x += dx * m;
+                node.vel.y += dy * m;
+                other.vel.x -= dx * m;
+                other.vel.y -= dy * m;
+            }
+
+            // Multiplier, converts edge.len into a length in pixels
+            var lenmul = 50;
+
+            // Edges attract
+            for(var edge of node.edges) {
+                var other = edge.node1;
+                var dx = other.pos.x - node.pos.x;
+                var dy = other.pos.y - node.pos.y;
+                var dist = node.pos.dist(other.pos);
+
+                // Just say no to dividing by zero!
+                if(!dist) {
+                    dist = .01;
+                    var p = new Point().addSpeed(dist, Random.randRotation());
+                    dx += p.x;
+                    dy += p.y;
+                }
+
+                // Target distance (edge's length in pixels)
+                var tdist = edge.len * lenmul;
+
+                // Vector which would move node to where dist between
+                // node and other would be tdist
+                var mx = dx / dist * (dist - tdist);
+                var my = dy / dist * (dist - tdist);
+
+                var mul = .02 / 2;
+                node.vel.x += mx * mul;
+                node.vel.y += my * mul;
+                other.vel.x -= mx * mul;
+                other.vel.y -= my * mul;
+            }
+        }
         for(var node of this.nodes) node.step();
     }
 }
@@ -1620,7 +1682,12 @@ class Entity extends Sprite {
         var dist = this.pos.dist(other.pos, this.field.size);
 
         /* Avoid div by zero, eh */
-        if(dist < .1) dist = .1;
+        if(dist < .1) {
+            dist = .1;
+            var p = new Point().addSpeed(dist, Random.randRotation());
+            dx += p.x;
+            dy += p.y;
+        }
 
         /* Target distance: this and other are just barely touching */
         var tdist = this.radius + other.radius;
