@@ -521,8 +521,12 @@ class WeightedArray {
         return this;
     }
     addNormalized(other, m) {
-        this.normalize(other.getTotalWeight());
-        return this.add(other, m);
+        var otherTotalWeight = other.getTotalWeight();
+        if(otherTotalWeight) {
+            this.normalize(otherTotalWeight);
+            return this.add(other, m);
+        }
+        return this;
     }
     randValue() {
         var totalWeight = this.getTotalWeight();
@@ -1371,10 +1375,10 @@ class Entity extends Sprite {
     team = null;
     inheritTeamColor = true;
 
-    SHOT_KEYNAMES = 'xy';
     shotClass = {
         x: null,
         y: null,
+        ram: null, // only used by RamShip
     };
 
     thrustEffectClass = ThrustEffect;
@@ -1410,7 +1414,7 @@ class Entity extends Sprite {
         this.rot_vel = 0;
 
         this.shotprops = {};
-        for(var keyname of this.SHOT_KEYNAMES) {
+        for(var keyname in this.shotClass) {
             this.shotprops[keyname] = {
                 cooldown: 0,
                 n_shots: 0,
@@ -1478,7 +1482,7 @@ class Entity extends Sprite {
         }
     }
     step() {
-        for(var keyname of this.SHOT_KEYNAMES) {
+        for(var keyname in this.shotClass) {
             var shotprops = this.shotprops[keyname];
             if(shotprops.cooldown > 0) shotprops.cooldown--;
         }
@@ -1531,8 +1535,9 @@ class Entity extends Sprite {
         if(this.keys.r.wasDown) {
             this.turn(-this.rotspeed);
         }
-        for(var keyname of this.SHOT_KEYNAMES) {
+        for(var keyname in this.shotClass) {
             var shotprops = this.shotprops[keyname];
+            if(!this.keys[keyname]) continue; // e.g. 'ram'
             if(this.keys[keyname].wasDown && shotprops.cooldown === 0) {
                 this.fire(keyname);
             }
@@ -1545,13 +1550,14 @@ class Entity extends Sprite {
         this.vel.addSpeed(speed, rot);
         if(this.thrustEffectCooldown === 0) {
             if(this.thrustEffectClass) {
-                this.addThrustEffect(speed, rot + Math.PI);
+                this.addThrustEffect(this.thrustEffectClass,
+                    speed, rot + Math.PI);
             }
             this.thrustEffectCooldown += this.thrustEffectEvery;
         }
     }
-    addThrustEffect(speed, rot) {
-        var effect = this.field.addEffect(this.thrustEffectClass);
+    addThrustEffect(cls, speed, rot) {
+        var effect = this.field.addEffect(cls);
         effect.pos.copy(this.pos).addSpeed(this.radius, rot);
         effect.vel.copy(this.vel)
             .mul(this.thrustEffectVelMul)
@@ -1563,18 +1569,17 @@ class Entity extends Sprite {
         var speed_min = getDefault(opts.speed_min, 0);
         var speed_max = getDefault(opts.speed_max, 0);
         var velmul = getDefault(opts.velmul, 0);
+        var addx = getDefault(opts.addx, 0);
+        var addy = getDefault(opts.addy, 0);
 
-        var effects = [];
         for(var i = 0; i < n_effects; i++) {
             var effect = this.field.addEffect(cls);
             effect.rot = this.rot;
-            effect.pos.copy(this.pos);
+            effect.pos.copy(this.pos).addxy(addx, addy);
             var speed = Random.randNumber(speed_min, speed_max);
             effect.vel.copy(this.vel).mul(velmul)
                 .addSpeed(speed, Random.randRotation());
-            effects.push(effect);
         }
-        return effects;
     }
     emitShots(cls, n_shots, opts) {
         var rot_variance = getDefault(opts.rot_variance, 0);
@@ -1583,7 +1588,6 @@ class Entity extends Sprite {
         var speed_max = getDefault(opts.speed_max, 0);
 
         var velmul = .8;
-        var shots = [];
         for(var i = 0; i < n_shots; i++) {
             var shot = this.field.addShot(cls);
             shot.ship = this.ship;
@@ -1596,9 +1600,7 @@ class Entity extends Sprite {
             shot.vel.copy(this.vel).mul(velmul)
                 .addSpeed(speed, shot.rot);
             shot.afterShotBy(this);
-            shots.push(shot);
         }
-        return shots;
     }
     fire(keyname) {
         var shotprops = this.shotprops[keyname];
@@ -1642,8 +1644,15 @@ class Entity extends Sprite {
             + Random.randNumber(-.5, 5)
                 * cls.randomSpeedVariance;
 
+        var addpos = this.radius;
+
+        if(cls.isReverseShot) {
+            addpos = -addpos;
+            speed = -speed;
+        }
+
         shot.pos.copy(this.pos)
-            .addSpeed(this.radius, shot.rot + posrot);
+            .addSpeed(addpos, shot.rot + posrot);
         shot.vel.copy(this.vel)
             .mul(cls.initialVelMul)
             .addSpeed(speed, shot.rot);
@@ -2546,6 +2555,113 @@ class ScoutShip extends Ship {
     }
 }
 
+class RamShip extends Ship {
+    radius = 7 * RADIUSMUL;
+
+    thrustSpeed = 1.5;
+    reverseSpeed = .75;
+    velmul = .97;
+    rotspeed = Math.PI / 28;
+    rotmul = .65;
+
+    ramSpeed = 1.25;
+    ramDamage = 35;
+    minRamSpeed = 25;
+    maxRamSpeed = 50;
+
+    static maxhp = 200;
+
+    shotClass = {
+        x: ShortDoubleShot,
+        y: null,
+        ram: ReverseFlameShot,
+    };
+
+    shape_gap = .6; // gap between the two halves of this.picture when ramming
+
+    constructor(field) {
+        super(field);
+
+        this.shape_left = new Shape([
+            new Point(-1.2, -.95),
+            new Point( 1.2,    0),
+            new Point(-1  ,    0),
+        ]);
+        this.shape_right = this.shape_left.clone().flip();
+        this.picture = new Picture([
+            this.shape_left,
+            this.shape_right,
+        ]);
+    }
+    isRamming() {
+        return this.keys.y.wasDown && this.vel.dist() >= this.minRamSpeed;
+    }
+    fire(keyName) {
+        if(keyName == 'x' && this.isRamming()) return;
+        super.fire(keyName);
+    }
+    step() {
+        super.step();
+
+        if(this.isRamming()) {
+            this.shape_left.pos.y = -this.shape_gap / 2;
+            this.shape_right.pos.y = this.shape_gap / 2;
+
+            this.shotClass.ram = RamFlameShot;
+            this.fire('ram');
+
+            this.vel.addSpeed(this.ramSpeed, this.rot);
+        } else {
+            this.shape_left.pos.y = 0;
+            this.shape_right.pos.y = 0;
+
+            this.shotClass.ram = ReverseFlameShot;
+            if(this.keys.y.wasDown) this.fire('ram');
+        }
+    }
+    handleCollision(other) {
+        var isAlly = other instanceof Ship? other.isAlly(this): false;
+        if(this.isRamming() && !isAlly) {
+            var speed = this.vel.dist();
+            var damagemul = Math.min(
+                (speed - this.minRamSpeed)
+                    / (this.maxRamSpeed - this.minRamSpeed),
+                1);
+            var damage = this.ramDamage * damagemul;
+            other.damage(damage);
+
+            var hitVelMul = .5;
+            other.vel.addMul(this.vel, hitVelMul);
+
+            var velmul = .5;
+            this.vel.mul(velmul);
+
+            // r0: number between 0 and 1
+            //   0 -> this.radius is infinitely bigger than other.radius
+            //  .5 -> this.radius and other.radius are same size
+            //   1 -> other.radius is infinitely bigger than this.radius
+            var r0 = this.radius / (this.radius + other.radius);
+
+            // addx/addy: vector sending this.pos to the point where this
+            // touches other
+            var dx = other.pos.x - this.pos.x;
+            var dy = other.pos.y - this.pos.y;
+            var addx = dx * r0;
+            var addy = dy * r0;
+
+            this.emitEffects(SparkEffect, 4, {
+                speed_min: 2,
+                speed_max: 4,
+                velmul: .75,
+                addx: addx,
+                addy: addy,
+            });
+        }
+
+        super.handleCollision(other);
+    }
+}
+
 class AssaultShip extends Ship {
     radius = 12 * RADIUSMUL;
     thrustSpeed = 1.25;
@@ -2582,7 +2698,7 @@ class TorchShip extends Ship {
     static maxhp = 80;
 
     shotClass = {
-        x: FlameShot,
+        x: DoubleFlameShot,
         y: MineShot,
     };
 
@@ -3009,6 +3125,8 @@ class Shot extends Entity {
     static serialPosRotVariance = 0;
     static randomPosRotVariance = 0;
 
+    static isReverseShot = false;
+
     static initialSpeed = 20;
     static initialVelMul = 1;
     static randomSpeedVariance = 0;
@@ -3112,6 +3230,35 @@ class QuadrupleShot extends SingleShot {
     static cooldown = 2;
 }
 
+class MiniBlasterShot extends Shot {
+    radius = 4 * RADIUSMUL;
+    static initialSpeed = 18;
+    static initialVelMul = 1;
+    velmul = 1;
+
+    hitVelMul = .05;
+    hitDamage = 5;
+
+    maxAge = 12;
+    static cooldown = 8;
+
+    picture = Picture.newPolygon(6);
+
+    die() {
+        this.emitEffects(SmokeEffect, 1, {
+            speed_min: 3,
+            speed_max: 6,
+            velmul: .65,
+        });
+        this.emitShots(SingleShot, 2, {
+            rot_variance: Math.PI / 4,
+            speed_min: 10,
+            speed_max: 10,
+        });
+        super.die();
+    }
+}
+
 class BlasterShot extends Shot {
     radius = 10 * RADIUSMUL;
     static initialSpeed = 14;
@@ -3204,12 +3351,10 @@ class QuadrupleMissileShot extends MissileShot {
 }
 
 class FlameShot extends Shot {
-    static randomRotVariance = Math.PI / 20;
-    static randomPosRotVariance = Math.PI / 4;
+    static randomRotVariance = Math.PI / 40;
+    static randomPosRotVariance = Math.PI / 8;
     static randomSpeedVariance = 1.5;
 
-    static initialShots = 2;
-    static initialRotVariance = Math.PI / 9;
     static initialSpeed = 10;
     static initialVelMul = .8;
 
@@ -3241,6 +3386,28 @@ class FlameShot extends Shot {
     }
 }
 
+class DoubleFlameShot extends FlameShot {
+    static randomRotVariance = Math.PI / 20;
+    static randomPosRotVariance = Math.PI / 4;
+
+    static initialShots = 2;
+    static initialRotVariance = Math.PI / 9;
+}
+
+class ReverseFlameShot extends FlameShot {
+    static isReverseShot = true;
+
+    hitDamage = 3;
+    static cooldown = 1;
+}
+
+class RamFlameShot extends ReverseFlameShot {
+    radius = 5 * RADIUSMUL;
+    circleFillStyle = 'rgba(255,200,0,.35)';
+
+    hitDamage = 5;
+}
+
 class MineShot extends Shot {
     radius = 6 * RADIUSMUL;
     static initialSpeed = 0;
@@ -3256,7 +3423,7 @@ class MineShot extends Shot {
     circleLineWidth = 3;
 
     die() {
-        var shots = this.emitShots(FlameShot, 5, {
+        this.emitShots(FlameShot, 5, {
             rot_variance: Math.PI * 2,
             rand_rot_variance: Math.PI / 3,
             speed_min: 3,
@@ -3423,12 +3590,13 @@ var SHIP_CLASSES = [
     MoleShip,
     //EngineerShip,
     ChomperShip,
+    RamShip,
 ];
 
 
 var canvas = document.getElementById('canvas');
 
-var defaultMap = (function() {
+var defaultMap = new function() {
     var map = new Map();
 
     var tutorialTemplate = new FieldTemplate({
@@ -3441,7 +3609,6 @@ var defaultMap = (function() {
             'W         : attempt to warp to next area',
         ]),
     });
-    var tutorial1 = map.addNode(tutorialTemplate, 'Tutorial');
 
     var basicTemplate = new FieldTemplate({
         ships: new WeightedArray()
@@ -3453,7 +3620,11 @@ var defaultMap = (function() {
         height: new MinMax(DEFAULT_FIELD_HEIGHT * 2),
         rocks_per: new MinMax(DEFAULT_ROCKS_PER * 30),
         rock_radius: new MinMax(5, 15).mul(RADIUSMUL),
+        ships_per: new MinMax(DEFAULT_SHIPS_PER * 5),
         ships: new WeightedArray()
+            .addEntry(new ShipTemplate(RamShip, GREEN_TEAM))
+            .addEntry(new ShipTemplate(RamShip, BLUE_TEAM))
+            .addEntry(new ShipTemplate(RamShip, YELLOW_TEAM))
             .addEntry(new ShipTemplate(TorchShip, RED_TEAM)),
     });
     var rockTemplate = new FieldTemplate({
@@ -3467,17 +3638,44 @@ var defaultMap = (function() {
             .addEntry(new ShipTemplate(ChomperShip, RED_TEAM)),
     });
 
-    var basicNode = map.addNode(basicTemplate, 'Basic');
-    var fireNode = map.addNode(fireTemplate, 'Fire');
-    var rockNode = map.addNode(rockTemplate, 'Rock');
+    var nodes = {
+        tutorial1: map.addNode(tutorialTemplate, 'Tutorial'),
+        basic: map.addNode(basicTemplate, 'Basic'),
+        fire: map.addNode(fireTemplate, 'Fire'),
+        rock: map.addNode(rockTemplate, 'Rock'),
+    };
 
-    tutorial1.addEdge(basicNode);
-    basicNode.addEdge(fireNode, 2);
-    basicNode.addEdge(rockNode, 3);
+    var edgeDefinitions = {
+        tutorial1: {
+            basic: 1,
+        },
+        basic: {
+            fire: 2,
+            rock: 3,
+        },
+    };
+    for(var node0Name in edgeDefinitions) {
+        var node0 = nodes[node0Name];
+        var node1Names = edgeDefinitions[node0Name];
+        for(var node1Name in node1Names) {
+            var node1 = nodes[node1Name];
+            var len = node1Names[node1Name];
+            node0.addEdge(node1, len);
+        }
+    }
 
-    return map;
-})();
-var game = new Game(canvas, new MapProgress(defaultMap));
+    var startNodeName = getParam('start_node');
+    map.startEdge = startNodeName?
+        nodes[startNodeName].backedges[0].backEdge:
+        //nodes[startNodeName].edges[0].forwardEdge:
+        null;
+
+    return {
+        map,
+        nodes,
+    };
+};
+var game = new Game(canvas, new MapProgress(defaultMap.map));
 
 var player = game.addPlayer();
 game.mapKey(player.keys.u, KEY_U);
