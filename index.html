@@ -1385,6 +1385,8 @@ class Entity extends Sprite {
     thrustEffectSpeedMul = 2;
     thrustEffectVelMul = 1;
     thrustEffectEvery = 3;
+    thrustEffects = 1;
+    thrustEffectPosRot = 0;
 
     // Set to thrustEffectEvery each time a thrust Effect is created
     thrustEffectCooldown = 0;
@@ -1550,20 +1552,24 @@ class Entity extends Sprite {
         this.vel.addSpeed(speed, rot);
         if(this.thrustEffectCooldown === 0) {
             if(this.thrustEffectClass) {
-                this.addThrustEffect(this.thrustEffectClass,
-                    speed, rot + Math.PI);
+                this.addThrustEffects(speed, rot + Math.PI);
             }
             this.thrustEffectCooldown += this.thrustEffectEvery;
         }
     }
-    addThrustEffect(cls, speed, rot) {
-        var effect = this.field.addEffect(cls);
-        effect.pos.copy(this.pos).addSpeed(this.radius, rot);
-        effect.vel.copy(this.vel)
-            .mul(this.thrustEffectVelMul)
-            .addSpeed(speed * this.thrustEffectSpeedMul, rot);
-        effect.rot = rot;
-        return effect;
+    addThrustEffects(speed, rot) {
+        for(var i = 0; i < this.thrustEffects; i++) {
+            var effect = this.field.addEffect(this.thrustEffectClass);
+
+            var posrot = getRotVariance(i, this.thrustEffects)
+                * this.thrustEffectPosRot;
+
+            effect.pos.copy(this.pos).addSpeed(this.radius, rot + posrot);
+            effect.vel.copy(this.vel)
+                .mul(this.thrustEffectVelMul)
+                .addSpeed(speed * this.thrustEffectSpeedMul, rot);
+            effect.rot = rot;
+        }
     }
     emitEffects(cls, n_effects, opts) {
         var speed_min = getDefault(opts.speed_min, 0);
@@ -2576,6 +2582,9 @@ class RamShip extends Ship {
         y: null,
         ram: ReverseFlameShot,
     };
+
+    thrustEffects = 2;
+    thrustEffectPosRot = Math.PI / 2;
 
     shape_gap = .6; // gap between the two halves of this.picture when ramming
 
