@@ -29,7 +29,6 @@ body {
 * IDEAS:
 *
 * Really big ship (MotherShip) with "gravity" using Entity.magneticField
-* Hunter ship?.. BlasterShot + "wormhole" ability?..
 * Robot Swarm ship
 * Engineer "ship"
 * ShockTroop "ship"
@@ -86,6 +85,7 @@ var WARP_RADIUS = 10 * RADIUSMUL;
 var WARP_AFTER_STEPS = 30;
 var WARP_RADIUS = 10;
 var MAX_WARP_ADDRADIUS = 16;
+var DEFAULT_ADDHP = 1 / 40;
 
 // Game/field default options
 var DEFAULT_FIELD_WIDTH  = 1000;
@@ -981,6 +981,7 @@ class Field {
 
         for(var shot of this.shots) {
             for(var ship of this.ships) {
+                if(ship.cloaked) continue;
                 if(shot.ship && ship.isAlly(shot.ship)) continue;
                 if(ship.rock) continue;
                 if(shot.colliding(ship)) shot.hit(ship);
@@ -1006,6 +1007,7 @@ class Field {
                 }
             }
             for(var ship of this.ships) {
+                if(ship.cloaked) continue;
                 if(rock.colliding(ship)) {
                     if(ship.rock === rock) continue;
                     if(ship.rockPullTo || ship.rockPullOn) {
@@ -1021,8 +1023,10 @@ class Field {
 
         for(var i = 0; i < this.ships.length; i++) {
             var ship = this.ships[i];
+            if(ship.cloaked) continue;
             for(var j = i + 1; j < this.ships.length; j++) {
                 var other = this.ships[j];
+                if(other.cloaked) continue;
                 var pullTo = ship.shipPullTo + other.shipPullOn;
                 var pullOn = ship.shipPullOn + other.shipPullTo;
                 if(pullTo || pullOn) {
@@ -1362,6 +1366,8 @@ class Entity extends Sprite {
     /* An Entity is a sprite with "volition" -- it has virtual keys which
     can be pressed, and based on their state, it can move itself. */
 
+    cloaked = false;
+
     thrustSpeed = 2;
     reverseSpeed = 1.25;
     velmul = .95;
@@ -1395,7 +1401,7 @@ class Entity extends Sprite {
 
     static maxhp = -1;
 
-    addhp = 1 / 40;
+    addhp = DEFAULT_ADDHP;
 
     constructor(field) {
         super(field);
@@ -1792,6 +1798,8 @@ class Entity extends Sprite {
         this.warping_counter = 0;
     }
     render(canvas, camera) {
+        if(this.cloaked) return;
+
         var fade = 1;
         if(this.fadeWithAge && this.maxAge >= 0) {
             // maxFade: don't set fade lower than 1 - maxFade, that
@@ -2732,6 +2740,71 @@ class TorchShip extends Ship {
     ]);
 }
 
+class HunterShip extends Ship {
+    radius = 10 * RADIUSMUL;
+    thrustSpeed = 1;
+    reverseSpeed = .5;
+    velmul = .95;
+    rotspeed = Math.PI / 26;
+    rotmul = .65;
+
+    static maxhp = 100;
+
+    addhp = DEFAULT_ADDHP * 2;
+
+    shotClass = {
+        x: DoubleMiniBlasterShot,
+        y: null,
+    };
+
+    thrustEffectClass = SmokeThrustEffect;
+    thrustEffectVelMul = .2;
+    thrustEffectEvery = 3;
+    thrustEffects = 2;
+    thrustEffectPosRot = Math.PI / 2;
+
+    picture = new Picture([
+        new Shape([
+            new Point(-.9, -.9 ),
+            new Point( .8, -.45),
+            new Point(-.9,  .9 ),
+            new Point( .8,  .45),
+        ], {radiusmul: 1.2}),
+    ]);
+
+    fire(keyname) {
+        if(this.cloaked) return;
+        super.fire(keyname);
+    }
+    thrust(speed, rot) {
+        if(this.cloaked) speed *= 2;
+        super.thrust(speed, rot);
+    }
+    step() {
+
+        var keyname = 'y';
+        var shotprops = this.shotprops[keyname];
+        if(shotprops.cooldown === 0) {
+            var cloaked = this.keys[keyname].wasDown;
+            if(cloaked != this.cloaked) {
+                this.cloaked = cloaked;
+                this.emitEffects(SmokeEffect, 4, {
+                    speed_min: 3,
+                    speed_max: 6,
+                    velmul: .65,
+                });
+                shotprops.cooldown += 5;
+            }
+        }
+
+        super.step();
+
+        if(this.cloaked) {
+            this.damage(this.addhp + 1/20);
+        }
+    }
+}
+
 class TurretShip extends Ship {
     radius = 6 * RADIUSMUL;
     thrustSpeed = .95;
@@ -3052,7 +3125,7 @@ class ChomperShip extends Ship {
     rotspeed = Math.PI / 30;
     rotmul = .65;
 
-    addhp = 1 / 10;
+    addhp = DEFAULT_ADDHP * 4;
 
     static maxhp = 250;
 
@@ -3271,6 +3344,12 @@ class MiniBlasterShot extends Shot {
         });
         super.die();
     }
+}
+
+class DoubleMiniBlasterShot extends MiniBlasterShot {
+    static serialShots = 2;
+    static serialRotVariance = Math.PI / 26;
+    static serialPosRotVariance = Math.PI / 3;
 }
 
 class BlasterShot extends Shot {
@@ -3605,6 +3684,7 @@ var SHIP_CLASSES = [
     //EngineerShip,
     ChomperShip,
     RamShip,
+    HunterShip,
 ];
 
 
@@ -3634,17 +3714,15 @@ var defaultMap = new function() {
         height: new MinMax(DEFAULT_FIELD_HEIGHT * 2),
         rocks_per: new MinMax(DEFAULT_ROCKS_PER * 30),
         rock_radius: new MinMax(5, 15).mul(RADIUSMUL),
-        ships_per: new MinMax(DEFAULT_SHIPS_PER * 5),
+        ships_per: new MinMax(DEFAULT_SHIPS_PER * 2),
         ships: new WeightedArray()
-            .addEntry(new ShipTemplate(RamShip, GREEN_TEAM))
-            .addEntry(new ShipTemplate(RamShip, BLUE_TEAM))
-            .addEntry(new ShipTemplate(RamShip, YELLOW_TEAM))
             .addEntry(new ShipTemplate(TorchShip, RED_TEAM)),
     });
     var rockTemplate = new FieldTemplate({
         width: new MinMax(DEFAULT_FIELD_WIDTH * 2),
         rocks_per: new MinMax(DEFAULT_ROCKS_PER * 10),
         rock_radius: new MinMax(30, 40).mul(RADIUSMUL),
+        ships_per: new MinMax(DEFAULT_SHIPS_PER * 2),
         ships: new WeightedArray()
             .addEntry(new ShipTemplate(MoleShip, GREEN_TEAM))
             .addEntry(new ShipTemplate(MoleShip, BLUE_TEAM))
