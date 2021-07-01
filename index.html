@@ -29,7 +29,6 @@ body {
 * IDEAS:
 *
 * Really big ship (MotherShip) with "gravity" using Entity.magneticField
-* Robot Swarm ship
 * Engineer "ship"
 * ShockTroop "ship"
 *
@@ -397,6 +396,96 @@ class Point {
     }
 }
 
+class Particle {
+    /* Represents a thing with position and velocity. */
+
+    modulo = null; // subclasses may override this
+
+    constructor() {
+        this.pos = new Point();
+        this.vel = new Point();
+    }
+    stepPhysics() {
+        this.pos.add(this.vel);
+    }
+    repel(other, opts) {
+        opts = opts || EMPTY;
+        var mul = getDefault(opts.mul, 1);
+
+        var dx, dy;
+        if(this.modulo) {
+            dx = moduloDiff(this.pos.x, other.pos.x, this.modulo.x);
+            dy = moduloDiff(this.pos.y, other.pos.y, this.modulo.y);
+        } else {
+            dx = other.pos.x - this.pos.x;
+            dy = other.pos.y - this.pos.y;
+        }
+
+        var dist = this.pos.dist(other.pos, this.modulo);
+
+        // Just say no to dividing by zero!
+        if(!dist) {
+            dist = .01;
+            var p = new Point().addSpeed(dist, Random.randRotation());
+            dx += p.x;
+            dy += p.y;
+        }
+
+        var m = -mul / (dist * dist);
+        this.vel.x += dx * m;
+        this.vel.y += dy * m;
+        other.vel.x -= dx * m;
+        other.vel.y -= dy * m;
+    }
+    spring(other, tdist, opts) {
+        // tdist: target distance (target spring length)
+
+        opts = opts || EMPTY;
+        var mul = getDefault(opts.mul, 1);
+        var push = getDefault(opts.push, true);
+
+        var dx, dy;
+        if(this.modulo) {
+            dx = moduloDiff(this.pos.x, other.pos.x, this.modulo.x);
+            dy = moduloDiff(this.pos.y, other.pos.y, this.modulo.y);
+        } else {
+            dx = other.pos.x - this.pos.x;
+            dy = other.pos.y - this.pos.y;
+        }
+
+        var dist = this.pos.dist(other.pos, this.modulo);
+
+        // Early exit if we're already within target distance, and caller
+        // said we shouldn't "push"
+        if(!push && dist <= tdist) return;
+
+        // Just say no to dividing by zero!
+        if(!dist) {
+            dist = .01;
+            var p = new Point().addSpeed(dist, Random.randRotation());
+            dx += p.x;
+            dy += p.y;
+        }
+
+        // Vector which would move this to where dist between
+        // this and other would be tdist
+        var mx = dx / dist * (dist - tdist);
+        var my = dy / dist * (dist - tdist);
+
+        // r0, r1: relative "weights" of this and other.
+        //    r0 is 0:   only other moves
+        //    r0 is 1/2: this & other each move just as much
+        //    r0 is 1:   only this moves
+        var r0 = getDefault(opts.r0, .5);
+        var r1 = 1 - r0;
+
+        this.vel.x += mx * r1 * mul;
+        this.vel.y += my * r1 * mul;
+        other.vel.x -= mx * r0 * mul;
+        other.vel.y -= my * r0 * mul;
+    }
+}
+
 class MinMax {
     /* Represents a range of numbers, min..max.
     Used for e.g. generating random values within a range. */
@@ -613,10 +702,12 @@ class FieldTemplate {
     }
 }
 
-class MapNode {
+class MapNode extends Particle {
     /* A node of the graph represented by class Map. */
 
     constructor(map, template, title) {
+        super();
+
         this.map = map;
         this.template = template;
         this.title = title;
@@ -628,8 +719,7 @@ class MapNode {
         // (also apparently known as a "force-directed graph")
         var speed = Random.randNumber(250);
         var rot = Random.randRotation();
-        this.pos = new Point().addSpeed(speed, rot);
-        this.vel = new Point();
+        this.pos.addSpeed(speed, rot);
         this.radius = 12;
 
         this.strokeStyle = 'rgba(20,100,200,.75)';
@@ -733,57 +823,19 @@ class Map {
             // Nodes repel
             for(var j = i + 1; j < this.nodes.length; j++) {
                 var other = this.nodes[j];
-                var dx = other.pos.x - node.pos.x;
-                var dy = other.pos.y - node.pos.y;
-                var dist = node.pos.dist(other.pos);
-
-                // Just say no to dividing by zero!
-                if(!dist) {
-                    dist = .01;
-                    var p = new Point().addSpeed(dist, Random.randRotation());
-                    dx += p.x;
-                    dy += p.y;
-                }
-
-                var mul = 5;
-                var m = -mul / (dist * dist);
-                node.vel.x += dx * m;
-                node.vel.y += dy * m;
-                other.vel.x -= dx * m;
-                other.vel.y -= dy * m;
+                node.repel(other, {mul: 5});
             }
 
             // Multiplier, converts edge.len into a length in pixels
             var lenmul = 50;
 
-            // Edges attract
+            // Edges act like springs
             for(var edge of node.edges) {
                 var other = edge.node1;
-                var dx = other.pos.x - node.pos.x;
-                var dy = other.pos.y - node.pos.y;
-                var dist = node.pos.dist(other.pos);
-
-                // Just say no to dividing by zero!
-                if(!dist) {
-                    dist = .01;
-                    var p = new Point().addSpeed(dist, Random.randRotation());
-                    dx += p.x;
-                    dy += p.y;
-                }
 
                 // Target distance (edge's length in pixels)
                 var tdist = edge.len * lenmul;
-
-                // Vector which would move node to where dist between
-                // node and other would be tdist
-                var mx = dx / dist * (dist - tdist);
-                var my = dy / dist * (dist - tdist);
-
-                var mul = .02 / 2;
-                node.vel.x += mx * mul;
-                node.vel.y += my * mul;
-                other.vel.x -= mx * mul;
-                other.vel.y -= my * mul;
+                //node.spring(other, tdist, {mul: .2});
             }
         }
         for(var node of this.nodes) node.step();
@@ -1117,16 +1169,15 @@ class Field {
     }
 }
 
-class Particle {
-    /* Represents a thing with position and velocity.
-    It lives on a Field. */
+class FieldParticle extends Particle {
+    /* A particle which lives on a field. */
 
     maxvel = 100;
 
     constructor(field) {
+        super();
         this.field = field;
-        this.pos = new Point();
-        this.vel = new Point();
+        this.modulo = field.size;
     }
     stepPhysics() {
         // Make sure velocity stays within this.maxvel
@@ -1251,7 +1302,7 @@ class Picture {
     }
 }
 
-class Sprite extends Particle {
+class Sprite extends FieldParticle {
     /* Represents a Particle which can be drawn onto a <canvas>. */
 
     radius = 10 * RADIUSMUL;
@@ -1677,7 +1728,7 @@ class Entity extends Sprite {
         /* We collided with another Entity! Now what?
         (Subclasses are free to answer that question in various ways...) */
 
-        if(this.is_warping) {
+        if(this.is_warping && !this.isAlly(other)) {
             this.abortWarp();
         }
     }
@@ -1837,7 +1888,7 @@ class Entity extends Sprite {
     }
 }
 
-class Camera extends Particle {
+class Camera extends FieldParticle {
     velmul = .7;
     springmul = .1;
 
@@ -2805,29 +2856,7 @@ class HunterShip extends Ship {
     }
 }
 
-class TurretShip extends Ship {
-    radius = 6 * RADIUSMUL;
-    thrustSpeed = .95;
-    reverseSpeed = .55;
-    velmul = .95;
-    rotspeed = Math.PI / 40;
-    rotmul = .7;
-
-    static maxhp = 180;
-
-    shotClass = {
-        x: QuadrupleShot,
-        y: QuadrupleMissileShot,
-    };
-
-    picture = new Picture([
-        Shape.newPolygon(6),
-        new Shape([
-            new Point(0  , 0),
-            new Point(1.2, 0),
-        ], {fill: false, close: false}),
-    ]);
-
+class BaseTurretShip extends Ship {
     flagship = null;
 
     remove() {
@@ -2843,40 +2872,16 @@ class TurretShip extends Ship {
     }
 }
 
-class FlagShip extends Ship {
-    radius = 10.5 * RADIUSMUL;
-    thrustSpeed = 1.25;
-    reverseSpeed = 1.25;
-    velmul = .9;
-    rotspeed = Math.PI / 34;
-    rotmul = .5;
-
-    shotClass = {
-        x: SingleShot,
-        y: MissileShot,
-    };
-
-    static maxhp = 175;
-
-    static max_turret_cooldown = 100;
-    static max_turrets = 2;
-
-    picture = new Picture([
-        new Shape([
-            new Point(-.9, -.3),
-            new Point(-.7, -.5),
-            new Point( .9, -.5),
-            new Point( .9,  .5),
-            new Point(-.7,  .5),
-            new Point(-.9,  .3),
-        ]),
-    ], {radiusmul: 1.2});
+class HasTurretsShip extends Ship {
+    max_turret_cooldown = 100;
+    max_turrets = 1;
+    turret_class = null; // should extend BaseTurretShip
 
     constructor(field) {
         super(field);
 
         this.turrets = [];
-        this.turret_cooldown = this.constructor.max_turret_cooldown;
+        this.turret_cooldown = this.max_turret_cooldown;
     }
     remove() {
         // We iterate over a copy of this.turrets, because when we kill
@@ -2887,8 +2892,7 @@ class FlagShip extends Ship {
         super.remove();
     }
     addTurret() {
-        var turret = this.field.addShip(TurretShip);
-        turret.hp = turret.maxhp = 60;
+        var turret = this.field.addShip(this.turret_class);
         turret.setTeam(this.team);
         turret.pos.copy(this.pos)
             .addSpeed(this.radius + turret.radius, this.rot);
@@ -2896,7 +2900,7 @@ class FlagShip extends Ship {
         turret.flagship = this;
 
         this.turrets.push(turret);
-        this.turret_cooldown = this.constructor.max_turret_cooldown;
+        this.turret_cooldown = this.max_turret_cooldown;
         return turret;
     }
     removeTurret(turret) {
@@ -2910,29 +2914,7 @@ class FlagShip extends Ship {
     }
     step() {
         super.step();
-        for(var turret of this.turrets) {
-            for(var keyname of 'xy') {
-                var key = this.keys[keyname];
-                turret.keys[keyname].copy(key);
-            }
-            for(var keyname of 'lrud') {
-                var key = this.keys[keyname];
-                turret.keys[keyname].up(key);
-            }
-
-            var targetAngle = turret.pos.angle(this.pos, this.field.size);
-            turret.rot_vel += rotDiff(turret.rot, targetAngle) * .2;
-
-            var dist = this.pos.dist(turret.pos, this.field.size);
-            var mindist = 45 * RADIUSMUL;
-            var maxdist = 65 * RADIUSMUL;
-            if(dist < mindist) {
-                turret.keys.u.down();
-            } else if(dist > maxdist) {
-                turret.keys.d.down();
-            }
-        }
-        if(this.turrets.length < this.constructor.max_turrets) {
+        if(this.turrets.length < this.max_turrets) {
             if(this.turret_cooldown) {
                 this.turret_cooldown--;
             } else {
@@ -2965,6 +2947,90 @@ class FlagShip extends Ship {
     renderPicture(canvas, camera, addx, addy) {
         this.renderTurretLines(canvas, camera, addx, addy);
         super.renderPicture(canvas, camera, addx, addy);
+    }
+}
+
+class TurretShip extends BaseTurretShip {
+    radius = 6 * RADIUSMUL;
+    thrustSpeed = .95;
+    reverseSpeed = .55;
+    velmul = .95;
+    rotspeed = Math.PI / 40;
+    rotmul = .7;
+
+    static maxhp = 180;
+
+    shotClass = {
+        x: QuadrupleShot,
+        y: QuadrupleMissileShot,
+    };
+
+    picture = new Picture([
+        Shape.newPolygon(6),
+        new Shape([
+            new Point(0  , 0),
+            new Point(1.2, 0),
+        ], {fill: false, close: false}),
+    ]);
+}
+
+class FlagTurretShip extends TurretShip {
+    static maxhp = 60;
+}
+
+class FlagShip extends HasTurretsShip {
+    radius = 10.5 * RADIUSMUL;
+    thrustSpeed = 1.25;
+    reverseSpeed = 1.25;
+    velmul = .9;
+    rotspeed = Math.PI / 34;
+    rotmul = .5;
+
+    shotClass = {
+        x: SingleShot,
+        y: MissileShot,
+    };
+
+    static maxhp = 175;
+
+    max_turret_cooldown = 100;
+    max_turrets = 2;
+    turret_class = FlagTurretShip;
+
+    picture = new Picture([
+        new Shape([
+            new Point(-.9, -.3),
+            new Point(-.7, -.5),
+            new Point( .9, -.5),
+            new Point( .9,  .5),
+            new Point(-.7,  .5),
+            new Point(-.9,  .3),
+        ]),
+    ], {radiusmul: 1.2});
+
+    step() {
+        super.step();
+        for(var turret of this.turrets) {
+            for(var keyname of 'xy') {
+                var key = this.keys[keyname];
+                turret.keys[keyname].copy(key);
+            }
+            for(var keyname of 'lrud') {
+                turret.keys[keyname].up();
+            }
+
+            var targetAngle = turret.pos.angle(this.pos, this.field.size);
+            turret.rot_vel += rotDiff(turret.rot, targetAngle) * .2;
+
+            var dist = this.pos.dist(turret.pos, this.field.size);
+            var mindist = 45 * RADIUSMUL;
+            var maxdist = 65 * RADIUSMUL;
+            if(dist < mindist) {
+                turret.keys.u.down();
+            } else if(dist > maxdist) {
+                turret.keys.d.down();
+            }
+        }
     }
 }
 
@@ -3199,6 +3265,124 @@ class ChomperShip extends Ship {
     }
 }
 
+function _initSwarmShip(leader) {
+    // Poor man's multiple inheritance...
+    // SwarmShip inherits from HasTurretsShip, SwarmTurretShip inherits
+    // from BaseTurretShip, but both classes need to share some common
+    // initialization, so here we are.
+
+    // Are we the leader of our swarm?..
+    leader = getDefault(leader, false);
+
+    this.thrustSpeed = 2.2;
+    this.reverseSpeed = 1.9;
+    this.velmul = .9;
+
+    this.rotspeed = Math.PI / 45;
+    this.rotmul = .75;
+
+    if(leader) {
+        // Leader is slower going forwards, but faster going backwards.
+        // That helps him stay behind his swarm...
+        this.thrustSpeed *= .8;
+        this.reverseSpeed *= 1.3;
+    }
+
+    this.shotClass = {
+        x: leader? BoldShortSingleShot: ShortSingleShot,
+        y: null,
+    };
+
+    this.picture = new Picture([
+        new Shape([
+            new Point(-1.0,    0),
+            new Point(- .1,   -.5),
+            new Point( 1.2,    0),
+            new Point(- .1,    .5),
+        ]),
+    ]);
+}
+
+class SwarmTurretShip extends BaseTurretShip {
+    radius = 5 * RADIUSMUL;
+
+    thrustSpeed = .7;
+    reverseSpeed = .4;
+    velmul = .975;
+    rotspeed = Math.PI / 45;
+    rotmul = .85;
+
+    static maxhp = 35;
+
+    initSwarmShip = _initSwarmShip;
+
+    constructor(field) {
+        super(field);
+        this.initSwarmShip();
+    }
+}
+
+class SwarmShip extends HasTurretsShip {
+    radius = 6 * RADIUSMUL;
+
+    static maxhp = 60;
+
+    circleLineWidth = 3;
+
+    max_turret_cooldown = 25;
+    max_turrets = 5;
+    turret_class = SwarmTurretShip;
+
+    initSwarmShip = _initSwarmShip;
+
+    constructor(field) {
+        super(field);
+        this.initSwarmShip(true);
+    }
+    step() {
+        var tightFormation = this.keys.y.isDown;
+
+        var tdist = (tightFormation? 25: 65) * RADIUSMUL;
+        var springmul = (tightFormation? .03: .02);
+        for(var turret of this.turrets) {
+            this.spring(turret, tdist,
+                {mul: springmul, push: false, r0: .85});
+        }
+
+        super.step();
+
+        for(var turret of this.turrets) {
+            var targetAngle = this.rot;
+            var rot_vel_mul = tightFormation? .2: .1;
+            turret.rot_vel += rotDiff(turret.rot, targetAngle)
+                * rot_vel_mul;
+
+            for(var keyname of 'y') {
+                turret.keys[keyname].up();
+            }
+
+            if(tightFormation) {
+                for(var keyname of 'xud') {
+                    var key = this.keys[keyname];
+                    turret.keys[keyname].copy(key);
+                }
+                for(var keyname of 'lr') {
+                    turret.keys[keyname].up();
+                }
+            } else {
+                for(var keyname of 'x') {
+                    var key = this.keys[keyname];
+                    turret.keys[keyname].copy(key);
+                }
+                for(var keyname of 'lrud') {
+                    if(Math.random() < .1) turret.keys[keyname].down();
+                    if(Math.random() < .1) turret.keys[keyname].up();
+                }
+            }
+        }
+    }
+}
+
 class Shot extends Entity {
 
     static initialShots = 1;
@@ -3273,6 +3457,11 @@ class SingleShot extends Shot {
 class ShortSingleShot extends SingleShot {
     static initialSpeed = 17;
     static cooldown = 3;
+}
+
+class BoldShortSingleShot extends SingleShot {
+    trailStrokeStyle = '#fa0';
+    trailLineWidth = 3;
 }
 
 class RapidSingleShot extends SingleShot {
@@ -3685,6 +3874,7 @@ var SHIP_CLASSES = [
     ChomperShip,
     RamShip,
     HunterShip,
+    SwarmShip,
 ];
 
 
