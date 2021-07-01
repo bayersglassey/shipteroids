@@ -1434,7 +1434,7 @@ class Entity extends Sprite {
     shotClass = {
         x: null,
         y: null,
-        ram: null, // only used by RamShip
+        extra1: null, // No key for this one
     };
 
     thrustEffectClass = ThrustEffect;
@@ -1595,7 +1595,7 @@ class Entity extends Sprite {
         }
         for(var keyname in this.shotClass) {
             var shotprops = this.shotprops[keyname];
-            if(!this.keys[keyname]) continue; // e.g. 'ram'
+            if(!this.keys[keyname]) continue; // e.g. 'extra1'
             if(this.keys[keyname].wasDown && shotprops.cooldown === 0) {
                 this.fire(keyname);
             }
@@ -2645,7 +2645,7 @@ class RamShip extends Ship {
     shotClass = {
         x: ShortDoubleShot,
         y: null,
-        ram: ReverseFlameShot,
+        extra1: ReverseFlameShot,
     };
 
     thrustEffects = 2;
@@ -2681,16 +2681,16 @@ class RamShip extends Ship {
             this.shape_left.pos.y = -this.shape_gap / 2;
             this.shape_right.pos.y = this.shape_gap / 2;
 
-            this.shotClass.ram = RamFlameShot;
-            this.fire('ram');
+            this.shotClass.extra1 = RamFlameShot;
+            this.fire('extra1');
 
             this.vel.addSpeed(this.ramSpeed, this.rot);
         } else {
             this.shape_left.pos.y = 0;
             this.shape_right.pos.y = 0;
 
-            this.shotClass.ram = ReverseFlameShot;
-            if(this.keys.y.wasDown) this.fire('ram');
+            this.shotClass.extra1 = ReverseFlameShot;
+            if(this.keys.y.wasDown) this.fire('extra1');
         }
     }
     handleCollision(other) {
@@ -2808,12 +2808,6 @@ class HunterShip extends Ship {
         y: null,
     };
 
-    thrustEffectClass = SmokeThrustEffect;
-    thrustEffectVelMul = .2;
-    thrustEffectEvery = 3;
-    thrustEffects = 2;
-    thrustEffectPosRot = Math.PI / 2;
-
     picture = new Picture([
         new Shape([
             new Point(-.9, -.9 ),
@@ -2823,6 +2817,22 @@ class HunterShip extends Ship {
         ], {radiusmul: 1.2}),
     ]);
 
+    thrustEffects = 2;
+    thrustEffectPosRot = Math.PI / 2;
+
+    constructor(field) {
+        super(field);
+        this.updateThrustEffects();
+    }
+    updateThrustEffects() {
+        if(this.cloaked) {
+            this.thrustEffectClass = SmokeThrustEffect;
+            this.thrustEffectVelMul = .2;
+        } else {
+            this.thrustEffectClass = ThrustEffect;
+            this.thrustEffectVelMul = 1;
+        }
+    }
     fire(keyname) {
         if(this.cloaked) return;
         super.fire(keyname);
@@ -2839,6 +2849,7 @@ class HunterShip extends Ship {
             var cloaked = this.keys[keyname].wasDown;
             if(cloaked != this.cloaked) {
                 this.cloaked = cloaked;
+                this.updateThrustEffects();
                 this.emitEffects(SmokeEffect, 4, {
                     speed_min: 3,
                     speed_max: 6,
