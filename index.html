@@ -28,7 +28,6 @@ body {
 /******************************
 * IDEAS:
 *
-* Rammer ship
 * Really big ship (MotherShip) with "gravity" using Entity.magneticField
 * Hunter ship?.. BlasterShot + "wormhole" ability?..
 * Robot Swarm ship
@@ -37,17 +36,23 @@ body {
 *
 * TODO:
 *
+* MoleShip: when leaving a rock, currently we add to this.addpos, but should
+* instead add to this.pos, or add some kind of marker so ship doesn't collide
+* with rocks for the rest of the frame.
+* (Otherwise, as currently, mole will be pushed violently out of rock for
+* 1 frame)
+*
+* When a Field is populated, we should make sure things don't overlap,
+* otherwise everything will start immediately rocketing around the screen.
+*
 * Should be able to aim camera at a player (camera.targetPlayer) so we don't
 * need maps to call setTarget explicitly...
 *
 * When a player loses their ship, reset players' keys (otherwise e.g. they can
 * still be holding Up while you're in the menu choosing ships)
+* (Is this... already done?)
 *
-* ScoutShip: opening/closing wings should have a cooldown
-*
-* SPRINGY PHYSICS ON MAP NODES
-*
-* Currently WarpMapMenu comes up when you arrive at a node; it would make
+* Currently WarpMapMenu comes up when you *arrive* at a node; it would make
 * more sense for it to come up when you *leave* the node.
 * Although then... either it would choose a "default" next edge for you,
 * or we would need to go back to having progress.edge allowed to be null.
@@ -2552,11 +2557,18 @@ class ScoutShip extends Ship {
         }
     }
     step() {
-        var wingsOut = !this.keys.y.wasDown;
-        if(wingsOut != this.wingsOut) {
-            this.wingsOut = wingsOut;
-            this._updateStats();
+
+        var keyname = 'y';
+        var shotprops = this.shotprops[keyname];
+        if(shotprops.cooldown === 0) {
+            var wingsOut = !this.keys[keyname].wasDown;
+            if(wingsOut != this.wingsOut) {
+                this.wingsOut = wingsOut;
+                this._updateStats();
+                shotprops.cooldown += 5;
+            }
         }
+
         super.step();
     }
 }
