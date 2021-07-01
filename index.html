@@ -36,12 +36,6 @@ body {
 *
 * TODO:
 *
-* MoleShip: when leaving a rock, currently we add to this.addpos, but should
-* instead add to this.pos, or add some kind of marker so ship doesn't collide
-* with rocks for the rest of the frame.
-* (Otherwise, as currently, mole will be pushed violently out of rock for
-* 1 frame)
-*
 * When a Field is populated, we should make sure things don't overlap,
 * otherwise everything will start immediately rocketing around the screen.
 *
@@ -2960,12 +2954,11 @@ class MoleShip extends Ship {
             var shotprops = this.shotprops[keyname];
             if(this.rock) {
 
-                // TODO: either add to this.pos instead of this.addpos,
-                // or add some kind of marker to this, so that it doesn't
-                // collide with rocks for the rest of this frame?..
-                this.addpos.addSpeed(this.rock.radius * .8, this.rot);
+                // NOTE: we add to this.pos, not this.addpos, otherwise
+                // this ship will collide with its rock and get a ton of
+                // velocity added to it this frame
+                this.pos.addSpeed(this.rock.radius * .5, this.rot);
 
-                this.vel.addSpeed(this.rock.radius * .2, this.rot);
                 this.exitRock();
                 shotprops.cooldown += 10;
             } else {
