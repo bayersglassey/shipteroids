@@ -106,19 +106,66 @@ var KEY_ESCAPE = 27;
 var KEY_WARP = 87; // 'W'
 var KEY_TAB = 9;
 
+class OrderedDictEntry {
+    constructor(key, value) {
+        this.key = key;
+        this.value = value;
+    }
+}
+class OrderedDict {
+    entries = []; // Array of OrderedDictEntry
+
+    size() {
+        return this.entries.length;
+    }
+    set(key, value) {
+        var entry = this.getEntry(key);
+        if(entry) {
+            entry.value = value;
+        } else {
+            var entry = new OrderedDictEntry(key, value);
+            this.entries.push(entry);
+        }
+        return this;
+    }
+    indexOf(value) {
+        for(var i = 0; i < this.entries.length; i++) {
+            var entry = this.entries[i];
+            if(entry.value === value) return i;
+        }
+        return -1;
+    }
+    getEntry(key) {
+        for(var entry of this.entries) {
+            if(entry.key === key) return entry;
+        }
+        return null;
+    }
+    get(key) {
+        var entry = this.getEntry(key);
+        if(entry) return entry.value;
+        return null;
+    }
+    getAt(i) {
+        var entry = this.entries[i];
+        if(entry) return entry.value;
+        return null;
+    }
+}
+
+// teams
 class Team {
     constructor(name, color) {
         this.name = name;
         this.color = color;
     }
 }
-
-// teams
-var GREEN_TEAM = new Team('Green', '#0f0');
-var RED_TEAM = new Team('Red', '#f33');
-var BLUE_TEAM = new Team('Blue', '#33f');
-var YELLOW_TEAM = new Team('Yellow', '#ff0');
-var TEAMS = [GREEN_TEAM, RED_TEAM, BLUE_TEAM, YELLOW_TEAM];
+var TEAMS = new OrderedDict()
+    .set('green', new Team('Green', '#0f0'))
+    .set('red', new Team('Red', '#f33'))
+    .set('blue', new Team('Blue', '#33f'))
+    .set('yellow', new Team('Yellow', '#ff0'))
+;
 
 
 function linear(x0, x1, n) {
@@ -398,6 +445,8 @@ class Point {
 class Particle {
     /* Represents a thing with position and velocity. */
 
+    radius = 1;
+
     modulo = null; // subclasses may override this
 
     constructor() {
@@ -493,6 +542,9 @@ class MinMax {
     constructor(min, max) {
         this.min = getDefault(min, 0);
         this.max = getDefault(max, this.min);
+    }
+    clone() {
+        return new this.constructor(this.min, this.max);
     }
     getRand() {
         return Random.randNumber(this.min, this.max);
@@ -665,6 +717,26 @@ class FieldTemplate {
     getSize() {
         return new Point(this.width.getRand(), this.height.getRand());
     }
+    clone(props) {
+        props = props || {};
+        for(var name in this) {
+            if(name in props) continue;
+
+            var thisProp = this[name];
+            if(thisProp instanceof MinMax) {
+                props[name] = thisProp.clone();
+            } else if(thisProp instanceof WeightedArray) {
+                props[name] = thisProp.clone();
+            } else if(typeof thisProp !== 'object') {
+                props[name] = thisProp;
+            } else {
+                console.log(this);
+                console.log(thisProp);
+                throw new Error('Dunno what to do with property: ' + name);
+            }
+        }
+        return new this.constructor(props);
+    }
     createInterpolated(other, m) {
         // We create & return a new FieldTemplate whose values are linear
         // interpolations of those in this and other.
@@ -835,7 +907,7 @@ class Map {
 
                 // Target distance (edge's length in pixels)
                 var tdist = edge.len * lenmul;
-                //node.spring(other, tdist, {mul: .2});
+                node.spring(other, tdist, {mul: .02});
             }
         }
         for(var node of this.nodes) node.step();
@@ -1174,6 +1246,7 @@ class FieldParticle extends Particle {
     /* A particle which lives on a field. */
 
     maxvel = 100;
+    radius = 10 * RADIUSMUL;
 
     constructor(field) {
         super();
@@ -1305,8 +1378,6 @@ class Picture {
 
 class Sprite extends FieldParticle {
     /* Represents a Particle which can be drawn onto a <canvas>. */
-
-    radius = 10 * RADIUSMUL;
 
     shouldRenderCircle = false;
     shouldRenderCircleLine = true;
@@ -1482,8 +1553,6 @@ class Entity extends Sprite {
 
         this.keys = Key.createKeys();
 
-        this.setTeam(GREEN_TEAM);
-
         this.age = 0;
         this.dead = false;
         this._shouldRemove = false;
@@ -1500,10 +1569,19 @@ class Entity extends Sprite {
     }
     setTeam(team) {
         this.team = team;
-        if(this.inheritTeamColor) {
+        if(team && this.inheritTeamColor) {
             this.lineStrokeStyle = team.color;
             this.circleStrokeStyle = team.color;
         }
+    }
+    isAlly(other) {
+        if(this === other) return true;
+        if(this.team && this.team === other.team) return true;
+        return this._isAlly(other) || other._isAlly(this);
+    }
+    _isAlly(other) {
+        // May be overridden by subclasses
+        return false;
     }
     heal(addhp) {
         if((this.hp += addhp) > this.maxhp) this.hp = this.maxhp;
@@ -1940,7 +2018,7 @@ class Player {
     constructor(game) {
         this.game = game;
         this.entity = null;
-        this.team = GREEN_TEAM;
+        this.team = TEAMS.get('green');
         this.keys = Key.createKeys();
     }
     setTeam(team) {
@@ -2265,13 +2343,13 @@ class TitleMenu extends Menu {
         } else if(keyCode === KEY_L) {
             if(action.name === 'choose ship') {
                 this.ship_class_i = modulo(this.ship_class_i - 1,
-                    SHIP_CLASSES.length);
+                    SHIP_CLASSES.size());
                 this.updateShipClass();
             }
         } else if(keyCode === KEY_R) {
             if(action.name === 'choose ship') {
                 this.ship_class_i = modulo(this.ship_class_i + 1,
-                    SHIP_CLASSES.length);
+                    SHIP_CLASSES.size());
                 this.updateShipClass();
             }
         } else if(keyCode === KEY_ENTER) {
@@ -2283,7 +2361,7 @@ class TitleMenu extends Menu {
     updateShipClass() {
         var old_ship = this.player.entity;
 
-        var cls = SHIP_CLASSES[this.ship_class_i];
+        var cls = SHIP_CLASSES.getAt(this.ship_class_i);
         var ship = this.player.createShip(cls);
 
         if(old_ship) {
@@ -2521,14 +2599,6 @@ class Ship extends Entity {
             velmul: .65,
         });
         super.die();
-    }
-    isAlly(other) {
-        if(this === other || this.team === other.team) return true;
-        return this._isAlly(other) || other._isAlly(this);
-    }
-    _isAlly(other) {
-        // May be overridden by subclasses
-        return false;
     }
 }
 
@@ -4070,20 +4140,20 @@ class Planet extends Entity {
 }
 
 
-var SHIP_CLASSES = [
-    FighterShip,
-    ScoutShip,
-    AssaultShip,
-    TorchShip,
-    TurretShip,
-    FlagShip,
-    MoleShip,
-    ChomperShip,
-    RamShip,
-    HunterShip,
-    SwarmShip,
-    EngineerShip,
-];
+var SHIP_CLASSES = new OrderedDict()
+    .set('fighter', FighterShip)
+    .set('scout', ScoutShip)
+    .set('assault', AssaultShip)
+    .set('torch', TorchShip)
+    .set('turret', TurretShip)
+    .set('flag', FlagShip)
+    .set('mole', MoleShip)
+    .set('chomper', ChomperShip)
+    .set('ram', RamShip)
+    .set('hunter', HunterShip)
+    .set('swarm', SwarmShip)
+    .set('engineer', EngineerShip)
+;
 
 
 var canvas = document.getElementById('canvas');
@@ -4091,78 +4161,97 @@ var canvas = document.getElementById('canvas');
 var defaultMap = new function() {
     var map = new Map();
 
-    var tutorialTemplate = new FieldTemplate({
-        text: new Text('Controls', [
-            'Left/right: turn left/right',
-            'Up/down   : thrust/reverse',
-            'Spacebar  : fire weapon / use ability #1',
-            'Shift     : fire weapon / use ability #2',
-            'Escape    : open menu',
-            'W         : attempt to warp to next area',
-        ]),
-    });
+    function mkships(teamsMap) {
+        var ships = new WeightedArray();
+        for(var teamName in teamsMap) {
+            var team = TEAMS.get(teamName);
+            var shipsMap = teamsMap[teamName];
+            for(var shipName in shipsMap) {
+                var shipClass = SHIP_CLASSES.get(shipName);
+                var weight = shipsMap[shipName];
+                var shipTemplate = new ShipTemplate(shipClass, team);
+                ships.addEntry(shipTemplate, weight);
+            }
+        }
+        return ships;
+    }
 
+    var tutorialTemplate = new FieldTemplate();
     var basicTemplate = new FieldTemplate({
-        ships: new WeightedArray()
-            .addEntry(new ShipTemplate(FighterShip, GREEN_TEAM))
-            .addEntry(new ShipTemplate(ScoutShip, BLUE_TEAM))
-            .addEntry(new ShipTemplate(AssaultShip, BLUE_TEAM)),
+        ships: mkships({
+            green: {fighter: 1},
+            blue: {scout: 1, assault: 1},
+        }),
     });
     var fireTemplate = new FieldTemplate({
         height: new MinMax(DEFAULT_FIELD_HEIGHT * 2),
         rocks_per: new MinMax(DEFAULT_ROCKS_PER * 30),
         rock_radius: new MinMax(5, 15).mul(RADIUSMUL),
         ships_per: new MinMax(DEFAULT_SHIPS_PER * 2),
-        ships: new WeightedArray()
-            .addEntry(new ShipTemplate(TorchShip, RED_TEAM)),
+        ships: mkships({red: {torch: 1}}),
     });
     var rockTemplate = new FieldTemplate({
         width: new MinMax(DEFAULT_FIELD_WIDTH * 2),
         rocks_per: new MinMax(DEFAULT_ROCKS_PER * 10),
         rock_radius: new MinMax(30, 40).mul(RADIUSMUL),
         ships_per: new MinMax(DEFAULT_SHIPS_PER * 2),
-        ships: new WeightedArray()
-            .addEntry(new ShipTemplate(MoleShip, GREEN_TEAM))
-            .addEntry(new ShipTemplate(MoleShip, BLUE_TEAM))
-            .addEntry(new ShipTemplate(MoleShip, YELLOW_TEAM))
-            .addEntry(new ShipTemplate(ChomperShip, RED_TEAM)),
+        ships: mkships({
+            green: {mole: 1},
+            blue: {mole: 1},
+            yellow: {mole: 1},
+            red: {chomper: 1},
+        }),
     });
 
-    var nodes = {
-        tutorial1: map.addNode(tutorialTemplate, 'Tutorial'),
-        basic: map.addNode(basicTemplate, 'Basic'),
-        fire: map.addNode(fireTemplate, 'Fire'),
-        rock: map.addNode(rockTemplate, 'Rock'),
-    };
-
-    var edgeDefinitions = {
-        tutorial1: {
-            basic: 1,
-        },
-        basic: {
-            fire: 2,
-            rock: 3,
-        },
-    };
-    for(var node0Name in edgeDefinitions) {
-        var node0 = nodes[node0Name];
-        var node1Names = edgeDefinitions[node0Name];
-        for(var node1Name in node1Names) {
-            var node1 = nodes[node1Name];
-            var len = node1Names[node1Name];
-            node0.addEdge(node1, len);
+    function mknodes(nodeMap) {
+        var nodes = {};
+        for(var nodeName in nodeMap) {
+            var nodeProps = nodeMap[nodeName];
+            var node = map.addNode(nodeProps.template, nodeProps.title);
+            nodes[nodeName] = node;
         }
+        for(var nodeName in nodeMap) {
+            var node = nodes[nodeName];
+            var nodeProps = nodeMap[nodeName];
+            var edgeMap = nodeProps.edges;
+            if(!edgeMap) continue;
+            for(var node1Name in edgeMap) {
+                var node1 = nodes[node1Name];
+                var len = edgeMap[node1Name];
+                node.addEdge(node1, len);
+            }
+        }
+        return nodes;
     }
+
+    function mknode(title, template, edges) {
+        return {title: title, template: template, edges: edges};
+    }
+    var nodes = mknodes({
+        tutorial1: mknode('Tutorial',
+            tutorialTemplate.clone({
+                text: new Text('Controls', [
+                    'Left/right: turn left/right',
+                    'Up/down   : thrust/reverse',
+                    'Spacebar  : fire weapon / use ability #1',
+                    'Shift     : fire weapon / use ability #2',
+                    'Escape    : open menu',
+                    'W         : attempt to warp to next area',
+                ]),
+            }), {basic: 1}),
+        basic: mknode('Basic', basicTemplate, {fire: 2, rock: 3}),
+        fire: mknode('Fire', fireTemplate),
+        rock: mknode('Rock', rockTemplate),
+    });
 
     var startNodeName = getParam('start_node');
     map.startEdge = startNodeName?
-        nodes[startNodeName].backedges[0].backEdge:
-        //nodes[startNodeName].edges[0].forwardEdge:
+        nodes[startNodeName].edges[0].forwardEdge:
         null;
 
     return {
-        map,
-        nodes,
+        map: map,
+        nodes: nodes,
     };
 };
 var game = new Game(canvas, new MapProgress(defaultMap.map));
