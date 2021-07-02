@@ -4171,32 +4171,23 @@ var defaultMap = new function() {
         return ships;
     }
 
-    var tutorialTemplate = new FieldTemplate();
-    var basicTemplate = new FieldTemplate({
-        ships: mkships({
-            green: {fighter: 1},
-            blue: {scout: 1, assault: 1},
-        }),
-    });
-    var fireTemplate = new FieldTemplate({
-        height: new MinMax(DEFAULT_FIELD_HEIGHT * 2),
-        rocks_per: new MinMax(DEFAULT_ROCKS_PER * 30),
-        rock_radius: new MinMax(5, 15).mul(RADIUSMUL),
-        ships_per: new MinMax(DEFAULT_SHIPS_PER * 2),
-        ships: mkships({red: {torch: 1}}),
-    });
-    var rockTemplate = new FieldTemplate({
-        width: new MinMax(DEFAULT_FIELD_WIDTH * 2),
-        rocks_per: new MinMax(DEFAULT_ROCKS_PER * 10),
-        rock_radius: new MinMax(30, 40).mul(RADIUSMUL),
-        ships_per: new MinMax(DEFAULT_SHIPS_PER * 2),
-        ships: mkships({
-            green: {mole: 1},
-            blue: {mole: 1},
-            yellow: {mole: 1},
-            red: {chomper: 1},
-        }),
-    });
+    function mktemplate(props) {
+        props = props || {};
+        props = Object.assign({}, props);
+
+        if(props.width) props.width.mul(DEFAULT_FIELD_WIDTH);
+        if(props.height) props.height.mul(DEFAULT_FIELD_HEIGHT);
+
+        if(props.stars_per) props.stars_per.mul(DEFAULT_STARS_PER);
+        if(props.rocks_per) props.rocks_per.mul(DEFAULT_ROCKS_PER);
+        if(props.planets_per) props.planets_per.mul(DEFAULT_PLANETS_PER);
+        if(props.ships_per) props.ships_per.mul(DEFAULT_SHIPS_PER);
+
+        if(props.rock_radius) props.rock_radius.mul(RADIUSMUL);
+        if(props.star_speed) props.star_speed.add(DEFAULT_STAR_SPEED);
+
+        return new FieldTemplate(props);
+    }
 
     function mknodes(nodeMap) {
         var nodes = {};
@@ -4222,9 +4213,11 @@ var defaultMap = new function() {
     function mknode(title, template, edges) {
         return {title: title, template: template, edges: edges};
     }
+
+
     var nodes = mknodes({
         tutorial1: mknode('Tutorial',
-            tutorialTemplate.clone({
+            mktemplate({
                 text: new Text('Controls', [
                     'Left/right: turn left/right',
                     'Up/down   : thrust/reverse',
@@ -4234,9 +4227,32 @@ var defaultMap = new function() {
                     'W         : attempt to warp to next area',
                 ]),
             }), {basic: 1}),
-        basic: mknode('Basic', basicTemplate, {fire: 2, rock: 3}),
-        fire: mknode('Fire', fireTemplate),
-        rock: mknode('Rock', rockTemplate),
+        basic: mknode('Basic',
+            mktemplate({ships: mkships({
+                green: {fighter: 1},
+                blue: {scout: 1, assault: 1},
+            })}), {fire: 2, rock: 3}),
+        fire: mknode('Fire',
+            mktemplate({
+                height: new MinMax(2),
+                rocks_per: new MinMax(30),
+                rock_radius: new MinMax(5, 15),
+                ships_per: new MinMax(2),
+                ships: mkships({red: {torch: 1}}),
+            })),
+        rock: mknode('Rock',
+            mktemplate({
+                width: new MinMax(2),
+                rocks_per: new MinMax(10),
+                rock_radius: new MinMax(30, 40),
+                ships_per: new MinMax(2),
+                ships: mkships({
+                    green: {mole: 1},
+                    blue: {mole: 1},
+                    yellow: {mole: 1},
+                    red: {chomper: 1},
+                }),
+            })),
     });
 
     var startNodeName = getParam('start_node');
