@@ -3111,17 +3111,12 @@ class FlagShip extends HasTurretsShip {
                 turret.keys[keyname].up();
             }
 
-            var targetAngle = turret.pos.angle(this.pos, this.field.size);
-            turret.rot_vel += rotDiff(turret.rot, targetAngle) * .2;
+            var tdist = 60 * RADIUSMUL;
+            this.spring(turret, tdist,
+                {mul: .02, push: false, r0: 1});
 
-            var dist = this.pos.dist(turret.pos, this.field.size);
-            var mindist = 45 * RADIUSMUL;
-            var maxdist = 65 * RADIUSMUL;
-            if(dist < mindist) {
-                turret.keys.u.down();
-            } else if(dist > maxdist) {
-                turret.keys.d.down();
-            }
+            var targetAngle = this.rot;
+            turret.rot_vel += rotDiff(turret.rot, targetAngle) * .2;
         }
     }
 }
