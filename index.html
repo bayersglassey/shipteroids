@@ -29,7 +29,6 @@ body {
 * IDEAS:
 *
 * Really big ship (MotherShip) with "gravity" using Entity.magneticField
-* Engineer "ship"
 * ShockTroop "ship"
 *
 * TODO:
@@ -476,7 +475,8 @@ class Particle {
         //    r0 is 0:   only other moves
         //    r0 is 1/2: this & other each move just as much
         //    r0 is 1:   only this moves
-        var r0 = getDefault(opts.r0, .5);
+        var r0 = getDefault(opts.r0,
+            this.radius / (this.radius + other.radius));
         var r1 = 1 - r0;
 
         this.vel.x += mx * r1 * mul;
@@ -1116,6 +1116,7 @@ class Field {
         for(var i = 0; i < entityArray.length; i++) {
             var entity = entityArray[i];
             if(entity._shouldRemove) {
+                entity.removed = true;
                 entity.cleanup();
                 entityArray.splice(i, 1);
                 i--;
@@ -1484,7 +1485,12 @@ class Entity extends Sprite {
         this.setTeam(GREEN_TEAM);
 
         this.age = 0;
+        this.dead = false;
         this._shouldRemove = false;
+
+        // removed: used by other entities with references to this one,
+        // so they know they should stop referencing it
+        this.removed = false;
     }
     getPlayer() {
         for(var player of this.field.game.players) {
@@ -1521,6 +1527,7 @@ class Entity extends Sprite {
         }
     }
     die() {
+        this.dead = true;
         this.remove();
     }
     remove() {
@@ -1672,11 +1679,15 @@ class Entity extends Sprite {
         var serial_i = shotprops.n_shots % cls.serialShots;
         for(var i = 0; i < cls.initialShots; i++) {
             var shot = this.shoot(cls, i, serial_i);
+            this.afterShot(shot);
             shot.afterShotBy(this);
         }
 
         shotprops.cooldown += cls.cooldown;
         shotprops.n_shots++;
+    }
+    afterShot(shot) {
+        // Subclasses may add special behaviour...
     }
     shoot(cls, shot_i, serial_shot_i) {
         // shot_i: index of this shot. E.g. if 3 are being fired at once,
@@ -1852,7 +1863,7 @@ class Entity extends Sprite {
         if(this.cloaked) return;
 
         var fade = 1;
-        if(this.fadeWithAge && this.maxAge >= 0) {
+        if(this.fadeWithAge && this.maxAge > 0) {
             // maxFade: don't set fade lower than 1 - maxFade, that
             // would be too close to 0, so we wouldn't be able to see
             // the Entity
@@ -3173,25 +3184,43 @@ class MoleShip extends Ship {
 
 class EngineerShip extends Ship {
     radius = 6 * RADIUSMUL;
-    thrustSpeed = 1.15;
-    reverseSpeed = .8;
-    velmul = .9;
+    thrustSpeed = .5;
+    reverseSpeed = .4;
+    velmul = .995;
     rotspeed = Math.PI / 50;
     rotmul = .85;
 
-    static maxhp = 60;
+    static maxhp = 85;
 
     thrustEffectClass = null;
 
     shotClass = {
-        x: DoubleShot,
+        x: RopeShot,
         y: null,
     };
 
     picture = new Picture([
         Shape.newPolygon(5).addxy(-.3, 0).mul(.9),
-        Shape.newPolygon(4).addxy(1.2, 0).mul(.5),
+        Shape.newPolygon(4, {rot: Math.PI / 4}).addxy(1.2, 0).mul(.5),
     ]);
+
+    ropeEnd = null;
+
+    afterShot(shot) {
+        super.afterShot(shot);
+        if(shot instanceof RopeShot) {
+            if(this.ropeEnd) {
+                this.ropeEnd.addOtherEnd(shot);
+                this.ropeEnd = null;
+            } else {
+                this.ropeEnd = shot;
+            }
+        }
+    }
+    step() {
+        super.step();
+        if(this.ropeEnd && this.ropeEnd.removed) this.ropeEnd = null;
+    }
 }
 
 class ChomperShip extends Ship {
@@ -3760,6 +3789,174 @@ class ChompShot extends Shot {
     }
 }
 
+class RopeShot extends Shot {
+    radius = 4 * RADIUSMUL;
+    static initialSpeed = 32;
+    static initialVelMul = .8;
+    velmul = .99;
+
+    hitVelMul = .45;
+    hitDamage = 0;
+
+    maxAge = 35;
+    connectedMaxAge = 0;
+    stuckMaxAge = 200;
+    static cooldown = 13;
+
+    picture = new Picture([
+        new Shape([
+            new Point(-1,  0),
+            new Point( 1,  0),
+        ], {fill: false}),
+        new Shape([
+            new Point( 0, -1),
+            new Point( 0,  1),
+        ], {fill: false}),
+    ]);
+
+    circleLineWidth = 3;
+    circleStrokeStyle = 'rgba(100,255,255,.7)';
+    inheritTeamColor = false;
+
+    otherEnd = null;
+    isFirstEnd = false;
+
+    // ropeLen: set when two ends are connected (so, when otherEnd is set).
+    // Only used by the end which isFirstEnd.
+    ropeLen = 0;
+
+    stickTarget = null;
+
+    die() {
+        // Do this first so that this.dead is true, preventing this.otherEnd
+        // from trying to call this.die() again (and causing an infinite loop)
+        super.die();
+
+        // The two ends die together
+        if(this.otherEnd && !this.otherEnd.dead) {
+            this.otherEnd.die();
+        }
+    }
+    hit(other) {
+
+        // Don't try to stick to something if we're already sticking
+        // to something
+        if(this.stickTarget) return;
+
+        // Don't try to stick to something this rope is already sticking to
+        if(this.otherEnd && this.otherEnd.stickTarget === other) return;
+
+        other.vel.addMul(this.vel, this.hitVelMul);
+        other.damage(this.hitDamage);
+        this.emitEffects(this.hitEffectClass, 2, {
+            speed_min: 2,
+            speed_max: 4,
+            velmul: .75,
+        });
+
+        this.addStickTarget(other);
+    }
+    step() {
+        if(this.stickTarget && this.stickTarget.removed) this.die();
+
+        if(this.otherEnd && this.isFirstEnd) {
+            var thisTarget = this.stickTarget? this.stickTarget: this;
+            var otherTarget = this.otherEnd.stickTarget?
+                this.otherEnd.stickTarget: this.otherEnd;
+            thisTarget.spring(otherTarget, this.ropeLen, {mul: .05});
+        }
+
+        if(this.stickTarget) {
+            this.pos.copy(this.stickTarget.pos);
+            this.vel.copy(this.stickTarget.vel);
+        }
+
+        super.step();
+    }
+    addStickTarget(stickTarget) {
+        this.stickTarget = stickTarget;
+        this.addMaxAge(this.stuckMaxAge);
+        if(this.otherEnd) {
+            var firstEnd = this.isFirstEnd? this: this.otherEnd;
+            firstEnd.ropeLen += stickTarget.radius;
+        }
+    }
+    addMaxAge(n) {
+        if(this.otherEnd && this.otherEnd.isFirstEnd) {
+            // The "first end" is in control of aging for both ends.
+            this.otherEnd.maxAge += n;
+        } else {
+            this.maxAge += n;
+        }
+    }
+    addOtherEnd(other) {
+        this.isFirstEnd = true;
+        this.ropeLen = this.pos.dist(other.pos, this.field.size);
+
+        this.otherEnd = other;
+        other.otherEnd = this;
+
+        // We take on other's maxAge, e.g. in case it has already been
+        // stuck to something, which adds this.stuckMaxAge, and we don't
+        // want to lose that when we set other.maxAge to -1 (see below).
+        this.maxAge += other.maxAge;
+
+        this.maxAge += this.connectedMaxAge;
+
+        // this and other are now connected, and we'd like them both
+        // to die at the exact same time.
+        // So we set other.maxAge to -1, which means it will not die
+        // from old age.
+        // So "the first end" is "in charge" of both ends' ages, as it were.
+        other.maxAge = -1;
+    }
+    renderRope(canvas, camera, addx, addy) {
+
+        // Only one end needs to render the rope
+        if(this.otherEnd && this.otherEnd.isFirstEnd) return;
+
+        // maxFade: don't set fade lower than 1 - maxFade, that
+        // would be too close to 0, so we wouldn't be able to see
+        // the Entity
+        var maxFade = .85;
+        var fade = 1 - (this.age / this.maxAge) * maxFade;
+
+        var strokeStyle = 'rgba(220,200,100,.75)';
+        var lineWidth = 2;
+        var otherEnd = this.ship;
+        if(this.otherEnd) {
+            lineWidth = 3;
+            otherEnd = this.otherEnd;
+        }
+
+        var ctx = canvas.getContext('2d');
+        ctx.strokeStyle = strokeStyle;
+        ctx.lineWidth = lineWidth;
+
+        var fieldx = this.field.size.x;
+        var fieldy = this.field.size.y;
+        var x0 = this.pos.x + addx;
+        var y0 = this.pos.y + addy;
+
+        var dx = moduloDiff(this.pos.x, otherEnd.pos.x, fieldx);
+        var dy = moduloDiff(this.pos.y, otherEnd.pos.y, fieldy);
+        var x1 = x0 + dx;
+        var y1 = y0 + dy;
+
+        ctx.globalAlpha = fade;
+        ctx.beginPath();
+        ctx.moveTo(x0, y0);
+        ctx.lineTo(x1, y1);
+        ctx.closePath();
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+    }
+    renderPicture(canvas, camera, addx, addy) {
+        this.renderRope(canvas, camera, addx, addy);
+        super.renderPicture(canvas, camera, addx, addy);
+    }
+}
+
 class Rock extends Entity {
 
     circleStrokeStyle = '#987';
@@ -3881,11 +4078,11 @@ var SHIP_CLASSES = [
     TurretShip,
     FlagShip,
     MoleShip,
-    //EngineerShip,
     ChomperShip,
     RamShip,
     HunterShip,
     SwarmShip,
+    EngineerShip,
 ];
 
 
