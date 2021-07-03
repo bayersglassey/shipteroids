@@ -70,6 +70,7 @@ var MAGNETIC_FIELD = getBoolParam('magnetic_field');
 
 // physics tweaking stuff
 var VELMUL = .7;
+var MAXSPEED = 80;
 var ROTVELMUL = .5;
 var RADIUSMUL = 2;
 var DAMAGEMUL = 1;
@@ -1255,7 +1256,6 @@ class Field {
 class FieldParticle extends Particle {
     /* A particle which lives on a field. */
 
-    maxvel = 100;
     radius = 10 * RADIUSMUL;
 
     constructor(field) {
@@ -1264,9 +1264,10 @@ class FieldParticle extends Particle {
         this.modulo = field.size;
     }
     stepPhysics() {
-        // Make sure velocity stays within this.maxvel
-        var veldist = this.vel.dist();
-        if(veldist > this.maxvel) this.vel.mul(this.maxvel / veldist);
+        // Make sure we don't go too gast
+        var maxspeed = MAXSPEED;
+        var speed = this.vel.dist();
+        if(speed > maxspeed) this.vel.mul(maxspeed / speed);
 
         this.pos.addMul(this.vel, VELMUL).modulo(this.field.size);
     }
@@ -1280,12 +1281,14 @@ class Shape {
     fill = true;
     close = true;
 
+    pos = new Point();
+    rot = 0;
+    radiusmul = 1;
+
+    points = null; // Array of Point
+
     constructor(points, props) {
-
-        this.pos = new Point();
-        this.rot = 0;
-        this.points = points || [];
-
+        if(points) this.points = points;
         if(props) for(var name in props) {
             if(name in this) this[name] = props[name];
         }
@@ -1308,12 +1311,13 @@ class Shape {
     }
     clone() {
         var points = this.points.map(p => p.clone());
-        var shape = new Shape(points);
+        var shape = new this.constructor(points);
         shape.stroke = this.stroke;
         shape.fill = this.fill;
         shape.close = this.close;
         shape.rot = this.rot;
-        shape.pos = this.pos.clone();
+        shape.radiusmul = this.radiusmul;
+        shape.pos.copy(this.pos);
         return shape;
     }
     flip() {
@@ -1369,7 +1373,7 @@ class Picture {
                     .rotate(shape.rot)
                     .add(shape.pos)
                     .rotate(rot)
-                    .mul(radius)
+                    .mul(radius * shape.radiusmul)
                     .addxy(x0, y0);
                 if(firstPoint) {
                     ctx.moveTo(p.x, p.y);
@@ -2735,8 +2739,6 @@ class RamShip extends Ship {
     thrustEffects = 2;
     thrustEffectPosRot = Math.PI / 2;
 
-    shape_gap = .6; // gap between the two halves of this.picture when ramming
-
     constructor(field) {
         super(field);
 
@@ -2746,9 +2748,13 @@ class RamShip extends Ship {
             new Point(-1  ,    0),
         ]);
         this.shape_right = this.shape_left.clone().flip();
+        this.shape_middle = Shape.newPolygon(4,
+            {radiusmul: 0, rot: Math.PI / 4},
+        ).mul(.2);
         this.picture = new Picture([
             this.shape_left,
             this.shape_right,
+            this.shape_middle,
         ]);
     }
     isRamming() {
@@ -2758,33 +2764,50 @@ class RamShip extends Ship {
         if(keyName == 'x' && this.isRamming()) return;
         super.fire(keyName);
     }
+    damage(hp) {
+        if(this.isRamming()) {
+            var hpmul = 1 - linear(0, .75, this.getRamPercent());
+            hp *= hpmul;
+        }
+        super.damage(hp);
+    }
     step() {
         super.step();
 
-        if(this.isRamming()) {
-            this.shape_left.pos.y = -this.shape_gap / 2;
-            this.shape_right.pos.y = this.shape_gap / 2;
+        var isRamming = this.isRamming();
 
+        var ramPercent = this.getRamPercent();
+        var ram_gap = .6 * ramPercent;
+        if(isRamming) ram_gap *= 2;
+        this.shape_left.pos.y = -ram_gap / 2;
+        this.shape_right.pos.y = ram_gap / 2;
+        this.shape_middle.radiusmul = ramPercent * (isRamming? 2: 1);
+
+        if(isRamming) {
             this.shotClass.extra1 = RamFlameShot;
             this.fire('extra1');
 
             this.vel.addSpeed(this.ramSpeed, this.rot);
         } else {
-            this.shape_left.pos.y = 0;
-            this.shape_right.pos.y = 0;
-
             this.shotClass.extra1 = ReverseFlameShot;
             if(this.keys.y.wasDown) this.fire('extra1');
         }
     }
+    getRamPercent() {
+        // Return number between 0 and 1, representing how far we are
+        // to max ram speed, where 0 indicates we have just started
+        // ramming (our velocity is just high enough that isRamming()
+        // is true).
+        var speed = this.vel.dist();
+        if(speed <= this.minRamSpeed) return 0;
+        if(speed >= this.maxRamSpeed) return 1;
+        return (speed - this.minRamSpeed)
+            / (this.maxRamSpeed - this.minRamSpeed);
+    }
     handleCollision(other) {
         var isAlly = other instanceof Ship? other.isAlly(this): false;
         if(this.isRamming() && !isAlly) {
-            var speed = this.vel.dist();
-            var damagemul = Math.min(
-                (speed - this.minRamSpeed)
-                    / (this.maxRamSpeed - this.minRamSpeed),
-                1);
+            var damagemul = this.getRamPercent();
             var damage = this.ramDamage * damagemul;
             other.damage(damage);
 
@@ -2828,7 +2851,7 @@ class AssaultShip extends Ship {
     rotspeed = Math.PI / 26;
     rotmul = .65;
 
-    static maxhp = 230;
+    static maxhp = 120;
 
     shotClass = {
         x: TripleShot,
