@@ -28,8 +28,7 @@ body {
 /******************************
 * IDEAS:
 *
-* Really big ship (MotherShip) with "gravity" using Entity.magneticField
-* ShockTroop "ship"
+* Really big ship (MotherShip) with "gravity"
 *
 * TODO:
 *
@@ -66,7 +65,6 @@ var RENDER_CIRCLES = getBoolParam('render_circles');
 var RENDER_BOUNDARY = getBoolParam('render_boundary');
 var HIDE_TEXT = getBoolParam('hide_text');
 var NODAMAGE = getBoolParam('nodamage');
-var MAGNETIC_FIELD = getBoolParam('magnetic_field');
 
 // physics tweaking stuff
 var VELMUL = .7;
@@ -344,8 +342,8 @@ class Point {
         var dx, dy;
         if(other) {
             if(modulo) {
-                dx = moduloDiff(other.x, this.x, modulo.x);
-                dy = moduloDiff(other.y, this.y, modulo.y);
+                dx = moduloDiff(this.x, other.x, modulo.x);
+                dy = moduloDiff(this.y, other.y, modulo.y);
             } else {
                 dx = other.x - this.x;
                 dy = other.y - this.y;
@@ -354,7 +352,7 @@ class Point {
             dx = this.x;
             dy = this.y;
         }
-        if(!dx || !dy) return undefined;
+        if(!dx && !dy) throw new Error("No angle between equal points");
         return Math.atan2(-dy, dx);
     }
     copy(other) {
@@ -375,6 +373,9 @@ class Point {
         this.x = Random.randNumber(other.x);
         this.y = Random.randNumber(other.y);
         return this;
+    }
+    eq(other) {
+        return this.x === other.x && this.y === other.y;
     }
     addxy(x, y) {
         this.x += x;
@@ -1116,15 +1117,13 @@ class Field {
 
         for(var shot of this.shots) {
             for(var ship of this.ships) {
-                if(ship.cloaked) continue;
                 if(shot.ship && ship.isAlly(shot.ship)) continue;
-                if(ship.rock) continue;
                 if(shot.colliding(ship)) shot.hit(ship);
                 // Don't bother calling handleCollision() with Shots
                 // (We might want to in future, though...)
             }
             for(var rock of this.rocks) {
-                if(shot.ship && rock.mole && shot.ship === rock.mole) continue;
+                if(shot.ship && rock.isAlly(shot.ship)) continue;
                 if(shot.colliding(rock)) shot.hit(rock);
                 // Don't bother calling handleCollision() with Shots
                 // (We might want to in future, though...)
@@ -1142,13 +1141,7 @@ class Field {
                 }
             }
             for(var ship of this.ships) {
-                if(ship.cloaked) continue;
                 if(rock.colliding(ship)) {
-                    if(ship.rock === rock) continue;
-                    if(ship.rockPullTo || ship.rockPullOn) {
-                        ship.magneticField(rock,
-                            ship.rockPullTo, ship.rockPullOn);
-                    }
                     rock.handleCollision(ship);
                     ship.handleCollision(rock);
                     rock.handleCollisionPhysics(ship);
@@ -1158,15 +1151,8 @@ class Field {
 
         for(var i = 0; i < this.ships.length; i++) {
             var ship = this.ships[i];
-            if(ship.cloaked) continue;
             for(var j = i + 1; j < this.ships.length; j++) {
                 var other = this.ships[j];
-                if(other.cloaked) continue;
-                var pullTo = ship.shipPullTo + other.shipPullOn;
-                var pullOn = ship.shipPullOn + other.shipPullTo;
-                if(pullTo || pullOn) {
-                    ship.magneticField(other, pullTo, pullOn);
-                }
                 if(ship.colliding(other)) {
                     ship.handleCollision(other);
                     other.handleCollision(ship);
@@ -1503,8 +1489,6 @@ class Entity extends Sprite {
     /* An Entity is a sprite with "volition" -- it has virtual keys which
     can be pressed, and based on their state, it can move itself. */
 
-    cloaked = false;
-
     thrustSpeed = 2;
     reverseSpeed = 1.25;
     velmul = .95;
@@ -1680,6 +1664,11 @@ class Entity extends Sprite {
         this.addpos.set();
     }
     handleKeys() {
+        this._handleKeys();
+        this.handleShotKeys();
+    }
+    _handleKeys() {
+        // May be overridden entirely, see ManShip
         if(this.keys.u.wasDown && !this.is_warping) {
             this.thrust(this.thrustSpeed, this.rot);
         }
@@ -1692,6 +1681,8 @@ class Entity extends Sprite {
         if(this.keys.r.wasDown) {
             this.turn(-this.rotspeed);
         }
+    }
+    handleShotKeys() {
         for(var keyname in this.shotClass) {
             var shotprops = this.shotprops[keyname];
             if(!this.keys[keyname]) continue; // e.g. 'extra1'
@@ -1760,7 +1751,6 @@ class Entity extends Sprite {
             var speed = Random.randNumber(speed_min, speed_max);
             shot.vel.copy(this.vel).mul(velmul)
                 .addSpeed(speed, shot.rot);
-            shot.afterShotBy(this);
         }
     }
     fire(keyname) {
@@ -1772,7 +1762,6 @@ class Entity extends Sprite {
         for(var i = 0; i < cls.initialShots; i++) {
             var shot = this.shoot(cls, i, serial_i);
             this.afterShot(shot);
-            shot.afterShotBy(this);
         }
 
         shotprops.cooldown += cls.cooldown;
@@ -1780,6 +1769,7 @@ class Entity extends Sprite {
     }
     afterShot(shot) {
         // Subclasses may add special behaviour...
+        shot.afterShotBy(this);
     }
     shoot(cls, shot_i, serial_shot_i) {
         // shot_i: index of this shot. E.g. if 3 are being fired at once,
@@ -1823,7 +1813,16 @@ class Entity extends Sprite {
             .addSpeed(speed, shot.rot);
         return shot;
     }
+    canCollide(other) {
+        if(this === other) return false;
+        return this._canCollide(other) && other._canCollide(this);
+    }
+    _canCollide(other) {
+        // Can be overridden by subclasses
+        return true;
+    }
     colliding(other) {
+        if(!this.canCollide(other)) return;
         var d = this.pos.dist(other.pos, this.field.size);
         return d < this.radius + other.radius;
     }
@@ -1885,39 +1884,9 @@ class Entity extends Sprite {
         other.vel.x -= mx * r0 * velmul;
         other.vel.y -= my * r0 * velmul;
     }
-    magneticField(other, pullTo, pullOn, opts) {
-        opts = opts || EMPTY;
-        pullTo = getDefault(pullTo, 1);
-        pullOn = getDefault(pullOn, 1);
-        var distmul = getDefault(opts.distmul, 1);
-        var velmul = getDefault(opts.velmul, 9);
-
-        /* r0: number between 0 and 1.
-        The closer it is to 1, the larger this.radius is than other.radius.
-        If .5, they are equal. */
-        var r0 = this.radius / (this.radius + other.radius);
-        var r1 = 1 - r0;
-
-        /* Distance between this and other */
-        var dist = this.pos.dist(other.pos, this.field.size);
-
-        /* Avoid div by zero, eh */
-        if(dist < .1) dist = .1;
-
-        /* dx, dy: shortest vector from this to other, on the torus
-        represented by this.field.size */
-        var dx = moduloDiff(this.pos.x, other.pos.x, this.field.size.x);
-        var dy = moduloDiff(this.pos.y, other.pos.y, this.field.size.y);
-
-        /* mx, my: vector which moves this towards other */
-        var m = Math.pow(dist * distmul, 2);
-        var mx = dx * velmul / m;
-        var my = dy * velmul / m;
-
-        this.vel.x  += mx * r1 * pullTo;
-        this.vel.y  += my * r1 * pullTo;
-        other.vel.x -= mx * r0 * pullOn;
-        other.vel.y -= my * r0 * pullOn;
+    canWarp() {
+        // May be overridden by subclasses
+        return !this.is_warping;
     }
     beginWarp() {
         this.is_warping = true;
@@ -1954,8 +1923,6 @@ class Entity extends Sprite {
         this.warping_counter = 0;
     }
     render(canvas, camera) {
-        if(this.cloaked) return;
-
         var fade = 1;
         if(this.fadeWithAge && this.maxAge > 0) {
             // maxFade: don't set fade lower than 1 - maxFade, that
@@ -2159,7 +2126,7 @@ class Game {
         } else if(keyCode === KEY_WARP) {
             // HACK!
             var ship = this.camera.target;
-            if(ship && !ship.is_warping && !ship.rock) {
+            if(ship && ship.canWarp()) {
                 ship.beginWarp();
             }
         } else {
@@ -2593,12 +2560,6 @@ class SparkEffect extends Effect {
 class Ship extends Entity {
     static maxhp = 100;
 
-    shipPullTo = MAGNETIC_FIELD? 1: 0;
-    shipPullOn = MAGNETIC_FIELD? 1: 0;
-
-    rockPullTo = 0;
-    rockPullOn = 0;
-
     die() {
         this.emitEffects(SmokeEffect, 4, {
             speed_min: 3,
@@ -2927,9 +2888,15 @@ class HunterShip extends Ship {
     thrustEffects = 2;
     thrustEffectPosRot = Math.PI / 2;
 
+    cloaked = false;
+
     constructor(field) {
         super(field);
         this.updateThrustEffects();
+    }
+    render(canvas, camera) {
+        if(this.cloaked) return;
+        super.render(canvas, camera);
     }
     updateThrustEffects() {
         if(this.cloaked) {
@@ -2972,6 +2939,10 @@ class HunterShip extends Ship {
             this.damage(this.addhp + 1/20);
         }
     }
+    _canCollide(other) {
+        if(this.cloaked) return false;
+        return super._canCollide(other);
+    }
 }
 
 class BaseTurretShip extends Ship {
@@ -2980,13 +2951,6 @@ class BaseTurretShip extends Ship {
     remove() {
         if(this.flagship) this.flagship.removeTurret(this);
         super.remove();
-    }
-    _isAlly(other) {
-        if(
-            other.flagship && this.flagShip &&
-            other.flagship.isAlly(this.flagship)
-        ) return true;
-        return super._isAlly(other);
     }
 }
 
@@ -3025,10 +2989,6 @@ class HasTurretsShip extends Ship {
         var i = this.turrets.indexOf(turret);
         this.turrets.splice(i, 1);
         turret.flagship = null;
-    }
-    _isAlly(other) {
-        if(this.turrets.indexOf(other) >= 0) return true;
-        return super._isAlly(other);
     }
     step() {
         super.step();
@@ -3230,15 +3190,13 @@ class MoleShip extends Ship {
             super.fire(keyname);
         }
     }
-    shoot(cls, shot_i, serial_shot_i) {
-        var shot = super.shoot(cls, shot_i, serial_shot_i);
+    afterShot(shot) {
+        super.afterShot(shot);
 
         var rock = this.rock;
         if(rock) {
             shot.addpos.addSpeed(rock.radius - this.radius, this.rot);
         }
-
-        return shot;
     }
     thrust(speed, rot) {
         var rock = this.rock;
@@ -3271,12 +3229,24 @@ class MoleShip extends Ship {
         this.rock.mole = null;
         this.rock = null;
     }
+    canWarp() {
+        if(this.rock) return false;
+        return super.canWarp();
+    }
+    _canCollide(other) {
+        if(other === this.rock) return false;
+        return super._canCollide();
+    }
+    _isAlly(other) {
+        if(other === this.rock) return true;
+        return super._isAlly(other);
+    }
 }
 
-class EngineerShip extends Ship {
+class ManShip extends Ship {
     radius = 6 * RADIUSMUL;
     thrustSpeed = .5;
-    reverseSpeed = .4;
+    reverseSpeed = .5;
     velmul = .995;
     rotspeed = Math.PI / 50;
     rotmul = .85;
@@ -3285,15 +3255,157 @@ class EngineerShip extends Ship {
 
     thrustEffectClass = null;
 
-    shotClass = {
-        x: RopeShot,
-        y: null,
-    };
-
     picture = new Picture([
-        Shape.newPolygon(5).addxy(-.3, 0).mul(.9),
+        Shape.newPolygon(4, {rot: Math.PI / 4}).addxy(-.3, 0).mul(.9),
         Shape.newPolygon(4, {rot: Math.PI / 4}).addxy(1.2, 0).mul(.5),
+        new Shape([
+            // left arm
+            new Point( .1, - .8),
+            new Point( .1, -1.2),
+        ]),
+        new Shape([
+            // right arm
+            new Point( .1,   .8),
+            new Point( .1,  1.2),
+        ]),
+        new Shape([
+            // left leg
+            new Point(- .9, -.5),
+            new Point(-1.2, -.8),
+        ]),
+        new Shape([
+            // right leg
+            new Point(- .9,  .5),
+            new Point(-1.2,  .8),
+        ]),
     ]);
+
+    rock = null;
+
+    // rockPos: our target position on the surface of this.rock
+    // (We store this point on ourself just so we don't have to allocate
+    // a fresh Point every frame... I don't know if that would actually
+    // affect Javascript's performance. O_o I'm sure it doesn't matter.
+    // Ah well, some habits from C die hard.)
+    rockPos = new Point();
+
+    step() {
+        if(this.rock && this.rock.removed) this.unsetRock();
+
+        super.step();
+
+        if(this.rock) this.followRock();
+    }
+    setRock(rock) {
+        this.rock = rock;
+
+        if(this.pos.eq(rock.pos)) {
+            this.rot = Random.randRotation();
+        } else {
+            this.rot = rock.pos.angle(this.pos, this.field.size);
+        }
+
+        this.emitEffects(SmokeEffect, 2, {
+            speed_min: 3,
+            speed_max: 6,
+            velmul: .65,
+        });
+        this.followRock();
+    }
+    unsetRock() {
+        this.rock = null;
+        this.emitEffects(SmokeEffect, 2, {
+            speed_min: 3,
+            speed_max: 6,
+            velmul: .65,
+        });
+    }
+    followRock() {
+        var rock = this.rock;
+
+        var fieldx = this.field.size.x;
+        var fieldy = this.field.size.y;
+
+        this.rockPos.copy(rock.pos)
+            .addSpeed(rock.radius + this.radius / 2, this.rot);
+        var dx = moduloDiff(this.pos.x, this.rockPos.x, fieldx);
+        var dy = moduloDiff(this.pos.y, this.rockPos.y, fieldy);
+
+        this.addpos.x += dx * .5;
+        this.addpos.y += dy * .5;
+        this.vel.x += dx * .2;
+        this.vel.y += dy * .2;
+    }
+    fire(keyname) {
+        if(keyname === 'y') {
+            var shotprops = this.shotprops[keyname];
+            if(this.rock) {
+                super.fire(keyname);
+            } else {
+                var foundRock = null;
+                for(var rock of this.field.rocks) {
+                    if(!this.colliding(rock)) continue;
+                    foundRock = rock;
+                    break;
+                }
+                if(foundRock) {
+                    this.setRock(foundRock);
+                    shotprops.cooldown += 30;
+                }
+            }
+        } else {
+            super.fire(keyname);
+        }
+    }
+    _handleKeys() {
+        if(this.rock) {
+            // Override Ship._handleKeys entirely
+
+            if(this.keys.u.wasDown && this.shotprops['y'].cooldown === 0) {
+                // Jump off this.rock
+                this.vel.addSpeed(this.thrustSpeed * 5, this.rot);
+                this.unsetRock();
+                this.shotprops['y'].cooldown += 30;
+                return;
+            }
+
+            // Turn slower when standing on bigger rocks
+            // (because this.rot affects our position directly, and we want
+            // to make sure we don't "move faster" when standing on bigger
+            // rocks)
+            var rotspeed = this.rotspeed * 1.5
+                * (DEFAULT_ROCK_RADIUS / this.rock.radius);
+
+            if(this.keys.l.wasDown) {
+                this.turn(rotspeed);
+            }
+            if(this.keys.r.wasDown) {
+                this.turn(-rotspeed);
+            }
+        } else {
+            super._handleKeys();
+        }
+    }
+    canWarp() {
+        if(this.rock) return false;
+        return super.canWarp();
+    }
+    _canCollide(other) {
+        if(other === this.rock) return false;
+        return super._canCollide();
+    }
+    _isAlly(other) {
+        if(other === this.rock) return true;
+        return super._isAlly(other);
+    }
+}
+
+class EngineerShip extends ManShip {
+
+    shotClass = {
+        x: ToolShot,
+        y: RopeShot,
+    };
 
     ropeEnd = null;
 
@@ -3312,6 +3424,39 @@ class EngineerShip extends Ship {
         super.step();
         if(this.ropeEnd && this.ropeEnd.removed) this.ropeEnd = null;
     }
+}
+
+class TroopShip extends ManShip {
+    radius = 7 * RADIUSMUL;
+
+    static maxhp = 95;
+
+    shotClass = {
+        x: DoubleFlameShot,
+        y: DoubleMissileShot,
+    };
+
+    picture = new Picture([
+        Shape.newPolygon(5).addxy(-.3, 0).mul(.9),
+        Shape.newPolygon(4, {rot: Math.PI / 4}).addxy(1.2, 0).mul(.5),
+
+        // left arm
+        Shape.newPolygon(3).mul(.3).addxy(.1, -1),
+
+        // right arm
+        Shape.newPolygon(3).mul(.3).addxy(.1,  1),
+
+        new Shape([
+            // left leg
+            new Point(- .9, -.5),
+            new Point(-1.2, -.8),
+        ]),
+        new Shape([
+            // right leg
+            new Point(- .9,  .5),
+            new Point(-1.2,  .8),
+        ]),
+    ]);
 }
 
 class ChomperShip extends Ship {
@@ -3880,6 +4025,30 @@ class ChompShot extends Shot {
     }
 }
 
+class ToolShot extends Shot {
+    radius = 4 * RADIUSMUL;
+    static initialSpeed = 12;
+    static initialVelMul = .8;
+    velmul = .95;
+
+    hitVelMul = .25;
+    hitDamage = 10;
+
+    maxAge = 25;
+    static cooldown = 12;
+
+    picture = new Picture([
+        new Shape([
+            new Point(-1,  0),
+            new Point( 1,  0),
+        ], {fill: false}),
+        new Shape([
+            new Point( 0, -1),
+            new Point( 0,  1),
+        ], {fill: false}),
+    ]);
+}
+
 class RopeShot extends Shot {
     radius = 4 * RADIUSMUL;
     static initialSpeed = 32;
@@ -3892,7 +4061,7 @@ class RopeShot extends Shot {
     maxAge = 35;
     connectedMaxAge = 0;
     stuckMaxAge = 200;
-    static cooldown = 13;
+    static cooldown = 23;
 
     picture = new Picture([
         new Shape([
@@ -4174,6 +4343,7 @@ var SHIP_CLASSES = new OrderedDict()
     .set('hunter', HunterShip)
     .set('swarm', SwarmShip)
     .set('engineer', EngineerShip)
+    .set('troop', TroopShip)
 ;
 
 
@@ -4273,9 +4443,9 @@ var defaultMap = new function() {
                 rock_radius: new MinMax(30, 40),
                 ships_per: new MinMax(2),
                 ships: mkships({
-                    green: {mole: 1},
-                    blue: {mole: 1},
-                    yellow: {mole: 1},
+                    green: {mole: 1, troop: 1},
+                    blue: {mole: 1, troop: 1},
+                    yellow: {mole: 1, troop: 1},
                     red: {chomper: 1},
                 }),
             })),
