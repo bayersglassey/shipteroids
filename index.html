@@ -43,11 +43,6 @@ body {
 * still be holding Up while you're in the menu choosing ships)
 * (Is this... already done?)
 *
-* Currently WarpMapMenu comes up when you *arrive* at a node; it would make
-* more sense for it to come up when you *leave* the node.
-* Although then... either it would choose a "default" next edge for you,
-* or we would need to go back to having progress.edge allowed to be null.
-*
 ******************************/
 
 
@@ -872,13 +867,13 @@ class Map {
     /* A directed graph of MapNodes and MapEdges, each of which have an
     associated FieldTemplate. */
 
-    constructor() {
-        this.nodes = [];
-        this.startEdge = null; // DirectedMapEdge
-    }
-    getStartEdge() {
-        if(this.startEdge) return this.startEdge;
-        return this.nodes[0].getEdge(0);
+    nodes = [];
+    startNode = null;
+
+    getStartNode() {
+        if(this.startNode) return this.startNode;
+        if(this.nodes.length) return this.nodes[0];
+        return null;
     }
     addNode(template, title) {
         var node = new MapNode(this, template, title);
@@ -919,42 +914,57 @@ class MapProgress {
     For instance, the MapNode at which they are currently located, and
     the MapEdge along which they are travelling (if applicable). */
 
+    map = null;
+    node = null;
+    edge = null;
+
+    // edgeDist: how far we've travelled along this.edge.
+    // It should always be the case that:
+    //
+    //   edgeDist >= 0 && edgeDist < edge.getLen()
+    //
+    edgeDist = 0;
+
     template = null;
 
-    constructor(map) {
+    constructor(map, startNode) {
         if(!map.nodes.length) throw new Error('Map has no nodes');
+
         this.map = map;
-        this.edge = map.getStartEdge();
-
-        // edgeDist: how far we've travelled along this.edge.
-        // It should always be the case that:
-        //
-        //   edgeDist >= 0 && edgeDist < edge.getLen()
-        //
-        this.edgeDist = 0;
-
-        this.setTemplate();
+        this.node = getDefault(startNode, map.getStartNode());
+        this.updateTemplate();
     }
     canProceed() {
-        return (this.edgeDist < this.edge.getLen() - 1);
+        return Boolean(this.edge);
     }
     setEdge(edge) {
         if(this.canProceed()) {
-            throw new Error('Can\'t set edge yet, must proceed first');
+            throw new Error("Can't set edge yet, must proceed first");
         }
         this.edge = edge;
         this.edgeDist = 0;
-        this.setTemplate();
+        this.updateTemplate();
     }
     proceed() {
         if(!this.canProceed()) {
-            throw new Error('Can\'t proceed yet, must set edge first');
+            throw new Error("Can't proceed yet, must set edge first");
         }
 
-        this.edgeDist++;
-        this.setTemplate();
+        if(this.edgeDist < this.edge.getLen() - 1) {
+            this.edgeDist++;
+        } else {
+            this.node = this.edge.getNode1();
+            this.edge = null;
+        }
+
+        this.updateTemplate();
     }
-    setTemplate() {
+    updateTemplate() {
+        if(!this.edge) {
+            this.template = this.node.template;
+            return;
+        }
+
         var m = this.edgeDist / this.edge.getLen();
         var node0 = this.edge.getNode0();
         var node1 = this.edge.getNode1();
@@ -1912,11 +1922,13 @@ class Entity extends Sprite {
     finishWarp() {
         var progress = this.field.game.progress;
         if(progress.canProceed()) {
+            // Immediately warp to next area
             progress.proceed();
             this.field.game.warp();
         } else {
-            this.die();
+            // Pop up a menu, so player can choose where to warp to next
             this.field.game.setMenu(WarpMapMenu);
+            this.die();
         }
     }
     abortWarp() {
@@ -2385,28 +2397,24 @@ class TitleMenu extends Menu {
 }
 
 class MapMenu extends Menu {
+    /* A menu which shows game.progress.map */
 
     node = null;
     edge_i = 0;
 
-    // edge: calculated by updateEdge() based on edge_i
+    // edge: calculated by updateEdge() based on node, edge_i
+    // (Never null!)
     edge = null;
 
-    // text: calculated by updateEdge()
+    // text: instance of Text, calculated by updateEdge()
     text = null;
 
     constructor(game) {
         super(game);
-        this.initNode();
-    }
-    initNode() {
-        // Calls this.setNode.
-        // May be overridden by subclasses (who must still call
-        // this.setNode).
 
+        var node = game.progress.node;
         var edge = game.progress.edge;
-        var node = edge.getNode0();
-        var edge_i = node.getEdgeIndex(edge);
+        var edge_i = edge? node.getEdgeIndex(edge): 0;
         this.setNode(node, edge_i);
     }
     updateEdge() {
@@ -2417,20 +2425,18 @@ class MapMenu extends Menu {
     }
     updateText() {
         var title = this.node.title;
+        var lines = [];
 
         var progress = this.game.progress;
         var node1 = this.edge.getNode1();
-        if(this.edge === progress.edge) {
-            var lines = [
-                'Travelling to: ' + node1.title,
+        if(progress.edge && this.edge === progress.edge) {
+            lines.push('Travelling to: ' + node1.title);
+            lines.push(
                 'Progress: ' + progress.edgeDist
-                    + ' / ' + this.edge.getLen(),
-            ];
+                + ' / ' + progress.edge.getLen());
         } else {
-            var lines = [
-                'Towards: ' + node1.title,
-                'Distance: ' + this.edge.getLen(),
-            ];
+            lines.push('Towards: ' + node1.title);
+            lines.push('Distance: ' + this.edge.getLen());
         }
 
         this.text = new Text(title, lines);
@@ -2503,6 +2509,8 @@ class MapMenu extends Menu {
 }
 
 class TabMapMenu extends MapMenu {
+    /* Menu player sees while holding tab (to view the entire map) */
+
     keyDown(keyCode) {
         if(keyCode === KEY_U) {
             this.setNode(this.edge.getNode1());
@@ -2513,18 +2521,13 @@ class TabMapMenu extends MapMenu {
 }
 
 class WarpMapMenu extends MapMenu {
-    initNode() {
-        // Overriding MapMenu.initNode (to use edge.getNode1() instead
-        // of edge.getNode0())
+    /* Menu player uses to choose where to warp to next */
 
-        var edge = game.progress.edge;
-        var node = edge.getNode1();
-        this.setNode(node);
-    }
     keyDown(keyCode) {
         if(keyCode === KEY_ENTER) {
             var progress = this.game.progress;
             progress.setEdge(this.edge);
+            progress.proceed();
 
             this.game.warp();
 
@@ -4256,9 +4259,7 @@ var defaultMap = new function() {
     });
 
     var startNodeName = getParam('start_node');
-    map.startEdge = startNodeName?
-        nodes[startNodeName].edges[0].forwardEdge:
-        null;
+    map.startNode = startNodeName? nodes[startNodeName]: null;
 
     return {
         map: map,
