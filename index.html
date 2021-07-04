@@ -543,6 +543,9 @@ class MinMax {
     clone() {
         return new this.constructor(this.min, this.max);
     }
+    getAverage() {
+        return (this.min + this.max) / 2;
+    }
     getRand() {
         return Random.randNumber(this.min, this.max);
     }
@@ -1668,7 +1671,7 @@ class Entity extends Sprite {
         this.handleShotKeys();
     }
     _handleKeys() {
-        // May be overridden entirely, see ManShip
+        // May be overridden entirely, see SuitShip
         if(this.keys.u.wasDown && !this.is_warping) {
             this.thrust(this.thrustSpeed, this.rot);
         }
@@ -3243,7 +3246,7 @@ class MoleShip extends Ship {
     }
 }
 
-class ManShip extends Ship {
+class SuitShip extends Ship {
     radius = 6 * RADIUSMUL;
     thrustSpeed = .5;
     reverseSpeed = .5;
@@ -3400,7 +3403,7 @@ class ManShip extends Ship {
     }
 }
 
-class EngineerShip extends ManShip {
+class EngineerShip extends SuitShip {
 
     shotClass = {
         x: ToolShot,
@@ -3426,7 +3429,7 @@ class EngineerShip extends ManShip {
     }
 }
 
-class TroopShip extends ManShip {
+class TroopShip extends SuitShip {
     radius = 7 * RADIUSMUL;
 
     static maxhp = 95;
@@ -4379,8 +4382,8 @@ var defaultMap = new function() {
         if(props.planets_per) props.planets_per.mul(DEFAULT_PLANETS_PER);
         if(props.ships_per) props.ships_per.mul(DEFAULT_SHIPS_PER);
 
-        if(props.rock_radius) props.rock_radius.mul(RADIUSMUL);
-        if(props.star_speed) props.star_speed.add(DEFAULT_STAR_SPEED);
+        if(props.rock_radius) props.rock_radius.mul(DEFAULT_ROCK_RADIUS * RADIUSMUL);
+        if(props.star_speed) props.star_speed.mul(DEFAULT_STAR_SPEED);
 
         return new FieldTemplate(props);
     }
@@ -4406,13 +4409,45 @@ var defaultMap = new function() {
         return nodes;
     }
 
-    function mknode(title, template, edges) {
+    function defnode(title, template, edges) {
+        // "defnode" not "mknode" because we don't actually return
+        // a MapNode.
         return {title: title, template: template, edges: edges};
     }
 
+    /*
+    fighter
+    scout
+    assault
+    torch
+    turret
+    flag
+    mole
+    chomper
+    ram
+    hunter
+    swarm
+    engineer
+    troop
+
+    Green team:
+        Mostly fighter, scout, assault
+        Often has low chance of flagship
+    Yellow team:
+        "utility" ships like mole, engineer?..
+        Most common fighting ship is scout?..
+    Blue team:
+        They like asteroids. Miners?..
+        Assault, hunter, swarm?..
+    Red team:
+        torch, ram, chomper, troop?.. is the fire motif too obvious? :P
+
+    Asteroid belt:
+        Sweeps kind of northwest to southeast across the map
+    */
 
     var nodes = mknodes({
-        tutorial1: mknode('Tutorial',
+        tutorial1: defnode('Tutorial',
             mktemplate({
                 text: new Text('Controls', [
                     'Left/right: turn left/right',
@@ -4422,31 +4457,117 @@ var defaultMap = new function() {
                     'Escape    : open menu',
                     'W         : attempt to warp to next area',
                 ]),
-            }), {basic: 1}),
-        basic: mknode('Basic',
+            }), {basic0: 1}),
+
+        // BASIC TRAINING
+        // A circular set of fields, introducing you to the most common
+        // types of ship.
+        basic0: defnode('Basic Training',
             mktemplate({ships: mkships({
-                green: {fighter: 1},
-                blue: {scout: 1, assault: 1},
-            })}), {fire: 2, rock: 3}),
-        fire: mknode('Fire',
+                green: {fighter: 1, scout: .5, assault: .5},
+                blue: {fighter: 1, assault: 1},
+            })}), {basic1: 2, corridor0: 3}),
+        basic1: defnode('Basic Training',
+            mktemplate({ships: mkships({
+                green: {fighter: 1, assault: .5, flag: .5},
+                yellow: {fighter: 1, scout: 2},
+            })}), {basic2: 2}),
+        basic2: defnode('Basic Training',
+            mktemplate({ships: mkships({
+                green: {fighter: .5, assault: 1, flag: .5},
+                yellow: {fighter: 2, scout: 1, mole: .5},
+            })}), {basic3: 2}),
+        basic3: defnode('Basic Training',
+            mktemplate({ships: mkships({
+                green: {assault: 1, scout: 1},
+                yellow: {fighter: 1, mole: 1},
+                red: {torch: 1},
+            })}), {basic0: 2, fire0: 4}),
+
+        // FIRE
+        // A place full of torches and rams. Presumably red team's home base.
+        fire0: defnode('Fire',
             mktemplate({
                 height: new MinMax(2),
                 rocks_per: new MinMax(30),
-                rock_radius: new MinMax(5, 15),
+                rock_radius: new MinMax(.5, 1.5),
                 ships_per: new MinMax(2),
                 ships: mkships({red: {torch: 1}}),
             })),
-        rock: mknode('Rock',
+
+        // CORRIDOR
+        // A series of wide fields, with not many rocks, stars, or planets.
+        // Mostly blue team (assault+hunter), with some red (chomper+hunter).
+        // Maybe the first time you meet hunters?..
+        corridor0: defnode('Corridor',
+            mktemplate({
+                width: new MinMax(1, 2),
+                height: new MinMax(.5, 1),
+                rocks_per: new MinMax(.7),
+                rock_radius: new MinMax(1, 2),
+                stars_per: new MinMax(.2),
+                planets_per: new MinMax(.2),
+                ships: mkships({
+                    green: {fighter: 1},
+                    blue: {assault: 1, hunter: .5},
+                    red: {chomper: 1},
+                }),
+            }), {corridor1: 4}),
+        corridor1: defnode('Corridor',
+            mktemplate({
+                width: new MinMax(2, 3),
+                height: new MinMax(1),
+                rocks_per: new MinMax(.7),
+                rock_radius: new MinMax(1, 3),
+                ships_per: new MinMax(.8),
+                stars_per: new MinMax(.2),
+                planets_per: new MinMax(.2),
+                ships: mkships({
+                    blue: {assault: 1, hunter: .5},
+                    red: {chomper: 1, hunter: .5},
+                }),
+            }), {corridor2: 4}),
+        corridor2: defnode('Corridor',
+            mktemplate({
+                width: new MinMax(2, 3),
+                height: new MinMax(1, 2),
+                rocks_per: new MinMax(.5),
+                rock_radius: new MinMax(1, 3),
+                ships_per: new MinMax(.8),
+                stars_per: new MinMax(.2),
+                planets_per: new MinMax(.2),
+                ships: mkships({
+                    blue: {assault: 1, hunter: .5, flag: .5},
+                    red: {chomper: 1, hunter: .5, ram: 1},
+                }),
+            }), {rock0: 3}),
+
+        // ROCK
+        // A big field, full of rocks, bit of every team, lots of moles & suits.
+        rock0: defnode('Rock',
             mktemplate({
                 width: new MinMax(2),
                 rocks_per: new MinMax(10),
-                rock_radius: new MinMax(30, 40),
+                rock_radius: new MinMax(.7, 3.2),
                 ships_per: new MinMax(2),
                 ships: mkships({
                     green: {mole: 1, troop: 1},
                     blue: {mole: 1, troop: 1},
-                    yellow: {mole: 1, troop: 1},
+                    yellow: {mole: 1, engineer: 1},
                     red: {chomper: 1},
+                }),
+            }), {rock1: 2}),
+        rock1: defnode('Rock',
+            mktemplate({
+                width: new MinMax(2),
+                rocks_per: new MinMax(20),
+                rock_radius: new MinMax(.5, 1.5),
+                ships_per: new MinMax(2),
+                ships: mkships({
+                    green: {fighter: 1, mole: .5, engineer: .5, troop: .5},
+                    blue: {assault: 1, mole: 1, troop: 1},
+                    yellow: {scout: 1, mole: 1, engineer: 1},
+                    red: {mole: .5, troop: 2},
                 }),
             })),
     });
