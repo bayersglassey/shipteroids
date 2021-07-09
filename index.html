@@ -392,8 +392,8 @@ class Point {
         return this.x === other.x && this.y === other.y;
     }
     addxy(x, y) {
-        this.x += x;
-        this.y += y;
+        this.x += getDefault(x, 0);
+        this.y += getDefault(y, 0);
         return this;
     }
     add(other) {
@@ -409,6 +409,11 @@ class Point {
     mul(n) {
         this.x *= n;
         this.y *= n;
+        return this;
+    }
+    mulxy(x, y) {
+        this.x *= getDefault(x, 1);
+        this.y *= getDefault(y, 1);
         return this;
     }
     modulo(other) {
@@ -439,6 +444,24 @@ class Point {
         this.x =  (x * cos - y * sin);
         this.y = -(x * sin + y * cos);
         return this;
+    }
+    static unit(rotmul) {
+        return new this(1).rotate(Math.PI * 2 * rotmul);
+    }
+    static units(len, array) {
+        /* Bit of a whacky function. Basically just used by LetterShapes. */
+        var points = [];
+        for(var elem of array) {
+            if(typeof elem === 'number') {
+                points.push(this.unit(elem / len));
+            } else if(elem instanceof Point) {
+                points.push(elem.clone());
+            } else {
+                console.log('Invalid array element', elem);
+                throw new Error('Invalid array element');
+            }
+        }
+        return points;
     }
     setSpeed(speed, rot) {
         return this.set(speed).rotate(rot);
@@ -708,6 +731,7 @@ class FieldTemplate {
     rocks, ships, etc). */
 
     text = null;
+    rocksText = null;
 
     width = new MinMax(DEFAULT_FIELD_WIDTH);
     height = new MinMax(DEFAULT_FIELD_HEIGHT);
@@ -1075,6 +1099,11 @@ class Field {
             player.setTeam(ship_template.team);
             player.createShip(ship_template.cls);
         }
+
+        // Maybe add rocks which spell out some text
+        if(template.rocksText) {
+            this.addRocksText(template.rocksText);
+        }
     }
     addEntityArray() {
         // Create an Array used to store Entity instances
@@ -1122,6 +1151,39 @@ class Field {
     addPendingEntities(entityArray) {
         for(var entity of entityArray.pending) entityArray.push(entity);
         entityArray.pending.length = 0;
+    }
+    addRocksText(text) {
+        if(!text.length) return;
+
+        var radiusmul = 1.2;
+
+        var shapes = LetterShapes.getShapes(text);
+        var radius = DEFAULT_ROCK_RADIUS * radiusmul;
+        var x0 = this.size.x / 2;
+        var y0 = this.size.y / 2 - radius * 2.5;
+
+        var padding = 0;
+        var w = text.length * (radius * 2) + (text.length - 1) * padding;
+        var x = x0 - w / 2;
+        var y = y0;
+        var dx = radius * 2 + padding;
+
+        for(var shape of shapes) {
+
+            // Kind of a hack: turn shape.radiusmul into a multiplier for
+            // rock's radius, instead of for shape's radius.
+            var thisRadius = radius * shape.radiusmul;
+            shape.mul = 1;
+
+            var rock = this.addRock(Rock, thisRadius);
+            rock.pos.set(x, y);
+            rock.vel.set();
+            rock.picture = new Picture([shape]);
+            rock.rot = 0;
+            rock.rot_vel = 0;
+
+            x += dx;
+        }
     }
     step() {
         for(var entityArray of this.entityArrays) {
@@ -1339,6 +1401,10 @@ class Shape {
         for(var point of this.points) point.mul(n);
         return this;
     }
+    mulxy(x, y) {
+        for(var point of this.points) point.mulxy(x, y);
+        return this;
+    }
 }
 
 class Picture {
@@ -1390,6 +1456,71 @@ class Picture {
             if(shape.fill) ctx.fill();
         }
 
+    }
+}
+
+class LetterShapes {
+
+    // I dare you to make sense of the following.
+    // (Hint: we're basically chipping each letter out of a decahedron.
+    // The points of the decahedron are represented by the numbers 0 through
+    // 9, and we use the Point.unit and Point.units helper functions to turn
+    // those numbers into points.)
+    static SHAPES_BY_LETTER = {
+        S: new Shape(Point.units(10, [
+            new Point(0, -.5), 1, 2, 3, 4,
+            new Point(0,  .5), 6, 7, 8, 9,
+        ])).mulxy(1, 1.3),
+        H: new Shape(Point.units(10, [
+            0, 1, 2,
+            Point.unit(2 / 10).addxy(0,  .5),
+            Point.unit(3 / 10).addxy(0,  .5), 3, 4,
+
+            5, 6, 7,
+            Point.unit(7 / 10).addxy(0, -.5),
+            Point.unit(8 / 10).addxy(0, -.5), 8, 9,
+        ])),
+        I: new Shape(Point.units(10, [1, 2, 3,  6, 7, 8]), {radiusmul: .9}),
+        P: new Shape(Point.units(10, [0, 1, 2, 3, 4,  7, 8,
+            Point.unit(0 / 10).addxy(-.6, .2)])),
+        t: new Shape(Point.units(10, [
+            Point.unit(1 / 10).addxy(-.2), 2, 3,
+            Point.unit(4 / 10).addxy( .2), 4, 5,
+            Point.unit(5 / 10).addxy( .5), 7, 8,
+            Point.unit(0 / 10).addxy(-.5), 0, 1,
+        ]), {radiusmul: 1}),
+        e: new Shape(Point.units(10, [0, 1, 2, 3, 4, 5, 6, 7, 8,
+            new Point(-.25)]), {radiusmul: .85}),
+        r: new Shape(Point.units(10, [0, 1, 2, 3, 4,  6, 7,
+            new Point(-.25), new Point(.2, -.2)]), {radiusmul: .85}),
+        o: Shape.newPolygon(10, {}, {radiusmul: 1}),
+        i: new Shape(Point.units(10, [
+            Point.unit(6 / 10).addxy(0, -.75), 6, 7, 8, 9,
+            Point.unit(9 / 10).addxy(0, -.75),
+            new Point(0, -.25), 2, 3,
+            new Point(0, -.25),
+        ]), {radiusmul: .85}).mulxy(.9, 1.2),
+        d: new Shape(Point.units(10, [
+            2, 3,
+            Point.unit(3 / 10).addxy(0, .75), 5, 6, 7, 8,
+        ]), {radiusmul: 1}),
+        s: new Shape(Point.units(10, [
+            new Point( .25, -.25), 1, 2, 3, 4,
+            new Point(-.25,  .25), 6, 7, 8, 9,
+        ])).mulxy(.9, .8),
+    };
+
+    static getShapes(text) {
+        var shapes = [];
+        for(var letter of text) {
+            var shape = this.SHAPES_BY_LETTER[letter];
+            if(!shape) {
+                throw new Error(
+                    'No shape defined for letter: ' + letter);
+            }
+            shapes.push(shape.clone());
+        }
+        return shapes;
     }
 }
 
@@ -1889,17 +2020,24 @@ class Entity extends Sprite {
         var mx = dx / dist * (dist - tdist);
         var my = dy / dist * (dist - tdist);
 
+        /* Update addpos */
         var posmul = .5;
         this.addpos.x  += mx * r1 * posmul;
         this.addpos.y  += my * r1 * posmul;
         other.addpos.x -= mx * r0 * posmul;
         other.addpos.y -= my * r0 * posmul;
 
+        /* Update vel */
         var velmul = .7;
         this.vel.x  += mx * r1 * velmul;
         this.vel.y  += my * r1 * velmul;
         other.vel.x -= mx * r0 * velmul;
         other.vel.y -= my * r0 * velmul;
+
+        /* Update rot_vel */
+        var rot_velmul = .15;
+        this.rot_vel  += other.rot_vel * r1 * rot_velmul;
+        other.rot_vel += this.rot_vel  * r0 * rot_velmul;
     }
     canWarp() {
         // May be overridden by subclasses
@@ -2329,7 +2467,7 @@ class TitleMenu extends Menu {
     }
     render() {
         var action = this.constructor.ACTIONS[this.action_i];
-        this.game.renderTitle('Shipteroids', action.subtitles);
+        this.game.renderTitle('Get Ready', action.subtitles);
     }
     keyDown(keyCode) {
         if(!this.player) return;
@@ -3698,6 +3836,9 @@ class Shot extends Entity {
     // How hard we move things we hit
     hitVelMul = .1;
 
+    // How much we transfer our rotational velocity to things we hit
+    hitRotMul = .1;
+
     // How much damage we do
     hitDamage = 10;
 
@@ -3725,6 +3866,7 @@ class Shot extends Entity {
     }
     hit(other) {
         other.vel.addMul(this.vel, this.hitVelMul);
+        other.rot_vel += this.rot_vel * this.hitRotMul;
         other.damage(this.hitDamage);
         this.emitEffects(this.hitEffectClass, 2, {
             speed_min: 2,
@@ -4463,6 +4605,8 @@ var defaultMap = new function() {
     var nodes = mknodes({
         tutorial1: defnode('Tutorial',
             mktemplate({
+                rocks_per: new MinMax(0),
+                rocksText: 'SHIPteroids',
                 text: new Text('Controls', [
                     'Left/right: turn left/right',
                     'Up/down   : thrust/reverse',
