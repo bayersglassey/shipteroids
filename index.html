@@ -765,7 +765,8 @@ class FieldTemplate {
                 props[name] = thisProp.clone();
             } else if(thisProp instanceof WeightedArray) {
                 props[name] = thisProp.clone();
-            } else if(typeof thisProp !== 'object') {
+            } else if(typeof thisProp !== 'object' || thisProp === null) {
+                // number, string, null
                 props[name] = thisProp;
             } else {
                 console.log(this);
@@ -795,13 +796,15 @@ class FieldTemplate {
                 props[name] = thisProp.clone().addNormalized(otherProp, m);
             } else if(typeof thisProp === 'number') {
                 props[name] = linear(thisProp, otherProp, m);
-            } else if(name === 'text') {
+            } else if(typeof thisProp === 'string' || typeof otherProp === 'string') {
                 if(m === 0) props[name] = thisProp;
                 else if(m === 1) props[name] = otherProp;
                 else if(thisProp === otherProp) props[name] = thisProp;
                 else {
                     // Don't bother trying to "interpolate" text.
                 }
+            } else if(thisProp === null || otherProp === null) {
+                props[name] = null;
             } else {
                 console.log(this, other);
                 console.log(thisProp, otherProp);
