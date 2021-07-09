@@ -1610,14 +1610,15 @@ class Key {
 
     static KEYNAMES = 'udlrxy';
 
-    constructor() {
+    constructor(name) {
+        this.name = name;
         this.isDown = false;
         this.wasDown = false;
     }
     static createKeys() {
         var keys = {};
         for(var keyname of this.KEYNAMES) {
-            keys[keyname] = new this();
+            keys[keyname] = new this(keyname);
         }
         return keys;
     }
@@ -1841,6 +1842,19 @@ class Entity extends Sprite {
                 this.fire(keyname);
             }
         }
+    }
+    stepCPUKeys(keys) {
+        // Do one step of a CPU player deciding which keys to press/release
+        // NOTE: keys is player.keys (presumably this.getPlayer().keys)
+        for(var keyname in keys) {
+            var key = keys[keyname];
+            this.stepCPUKey(key);
+        }
+    }
+    stepCPUKey(key) {
+        // Handle CPU player's decision of whether to press/release given key
+        if(Math.random() < .1) key.down();
+        if(Math.random() < .1) key.up();
     }
     turn(rot) {
         this.rot_vel += rot;
@@ -2196,19 +2210,22 @@ class Player {
 }
 
 class CPUPlayer extends Player {
+
     step() {
-        if(Math.random() < .1) this.keys.u.down();
-        if(Math.random() < .1) this.keys.u.up();
-        if(Math.random() < .1) this.keys.d.down();
-        if(Math.random() < .1) this.keys.d.up();
-        if(Math.random() < .1) this.keys.l.down();
-        if(Math.random() < .1) this.keys.l.up();
-        if(Math.random() < .1) this.keys.r.down();
-        if(Math.random() < .1) this.keys.r.up();
-        if(Math.random() < .1) this.keys.x.down();
-        if(Math.random() < .1) this.keys.x.up();
-        if(Math.random() < .1) this.keys.y.down();
-        if(Math.random() < .1) this.keys.y.up();
+
+        // Press/release keys
+        if(this.entity) {
+            // Entity decides which keys to press/release
+            // (Basically so each subclass of Ship can override the default
+            // "press random keys" implementation and maybe do something
+            // slightly smarter for its shotClasses.
+            // TODO: so maybe it's better to implement CPU stuff in CPUPlayer,
+            // by switching on entity's shotClasses?..)
+            this.entity.stepCPUKeys(this.keys);
+        } else {
+            for(var key of this.keys) key.down();
+        }
+
         super.step();
     }
 }
@@ -3097,6 +3114,22 @@ class HunterShip extends Ship {
             this.damage(this.addhp + 1/20);
         }
     }
+    stepCPUKey(key) {
+        if(key.name === 'y') {
+            if(this.hp < 15) {
+                // Don't kill yourself by staying cloaked at low health
+                key.up();
+            } else if(key.isDown) {
+                // Don't uncloak too soon
+                if(Math.random() < .05) key.up();
+            } else {
+                // Don't cloak too often
+                if(Math.random() < .05) key.down();
+            }
+        } else {
+            super.stepCPUKey(key);
+        }
+    }
     _canCollide(other) {
         if(this.cloaked) return false;
         return super._canCollide(other);
@@ -3318,6 +3351,21 @@ class MoleShip extends Ship {
             rock.heal(1 / 20);
         }
         super.step();
+    }
+    stepCPUKey(key) {
+        if(key.name === 'y') {
+            if(this.rock) {
+                // Usually don't exit your rock
+                if(Math.random() < .001) key.down();
+                else key.up();
+            } else {
+                // Try to enter rocks
+                if(Math.random() < .5) key.down();
+                else key.up();
+            }
+        } else {
+            super.stepCPUKey(key);
+        }
     }
     fire(keyname) {
         if(keyname === 'y') {
