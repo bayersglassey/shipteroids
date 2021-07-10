@@ -74,6 +74,7 @@ function getBoolParam(name) {
 }
 
 // debug stuff
+var DEBUG = getBoolParam('debug');
 var TIMING = getBoolParam('timing');
 var RENDER_CIRCLES = getBoolParam('render_circles');
 var RENDER_BOUNDARY = getBoolParam('render_boundary');
@@ -158,6 +159,12 @@ class OrderedDict {
         var entry = this.entries[i];
         if(entry) return entry.value;
         return null;
+    }
+    getKeys() {
+        return this.entries.map(entry => entry.key);
+    }
+    getValues() {
+        return this.entries.map(entry => entry.value);
     }
 }
 
@@ -1506,7 +1513,7 @@ class LetterShapes {
             new Point(-.25)]), {radiusmul: .85}),
         r: new Shape(Point.units(10, [0, 1, 2, 3, 4,  6, 7,
             new Point(-.25), new Point(.2, -.2)]), {radiusmul: .85}),
-        o: Shape.newPolygon(10, {}, {radiusmul: 1}),
+        o: Shape.newPolygon(10, {}, {radiusmul: 1.1}),
         i: new Shape(Point.units(10, [
             Point.unit(6 / 10).addxy(0, -.75), 6, 7, 8, 9,
             Point.unit(9 / 10).addxy(0, -.75),
@@ -1650,6 +1657,8 @@ class Key {
 class Entity extends Sprite {
     /* An Entity is a sprite with "volition" -- it has virtual keys which
     can be pressed, and based on their state, it can move itself. */
+
+    static name = 'Entity';
 
     thrustSpeed = 2;
     reverseSpeed = 1.25;
@@ -2179,6 +2188,9 @@ class Player {
 
     shipClass = null;
 
+    shipClasses = DEBUG? SHIP_CLASSES.getValues():
+        [FighterShip, ScoutShip, AssaultShip];
+
     constructor(game) {
         this.game = game;
         this.entity = null;
@@ -2304,7 +2316,7 @@ class Game {
         if(this.menu) {
             this.menu.keyDown(keyCode);
         } else if(keyCode === KEY_ESCAPE) {
-            this.setMenu(TitleMenu);
+            this.setMenu(ChooseShipMenu);
         } else if(keyCode === KEY_TAB) {
             this.setMenu(TabMapMenu);
         } else if(keyCode === KEY_WARP) {
@@ -2461,75 +2473,59 @@ class Menu {
     }
 }
 
-class TitleMenu extends Menu {
+class ChooseShipMenu extends Menu {
     player = null;
     ship_class_i = 0;
 
-    static ACTIONS = [
-        {
-            name: 'choose ship',
-            subtitles: [
-                'Choose your ship',
-                '(Left/right arrow keys + Enter)',
-            ],
-        },
-    ];
+    // Array of string, set by this.updateShipClass()
+    subtitles = null;
 
     constructor(game) {
         super(game);
-        this.action_i = 0;
 
-        if(game.players.length > 0) {
-            // Hack: choose first player
-            var player = game.players[0];
-            this.setPlayer(player);
+        if(!game.players.length) {
+            // Should never happen... *shifty eyes*
+            throw new Error('No players!');
         }
+
+        // Hack: choose first player
+        var player = game.players[0];
+        this.setPlayer(player);
     }
     setPlayer(player) {
         this.player = player;
 
         var ship = player.entity;
         this.ship_class_i = player.shipClass === null?
-            0: SHIP_CLASSES.indexOf(player.shipClass);
+            0: player.shipClasses.indexOf(player.shipClass);
 
         this.updateShipClass();
     }
     render() {
-        var action = this.constructor.ACTIONS[this.action_i];
-        this.game.renderTitle('Get Ready', action.subtitles);
+        this.game.renderTitle('Get Ready', this.subtitles);
     }
     keyDown(keyCode) {
         if(!this.player) return;
-        var action = this.constructor.ACTIONS[this.action_i];
-        if(keyCode === KEY_U) {
-            this.action_i = modulo(this.action_i - 1,
-                this.constructor.ACTIONS.length);
-        } else if(keyCode === KEY_D) {
-            this.action_i = modulo(this.action_i + 1,
-                this.constructor.ACTIONS.length);
-        } else if(keyCode === KEY_L) {
-            if(action.name === 'choose ship') {
-                this.ship_class_i = modulo(this.ship_class_i - 1,
-                    SHIP_CLASSES.size());
-                this.updateShipClass();
-            }
+        if(keyCode === KEY_L) {
+            this.ship_class_i = modulo(this.ship_class_i - 1,
+                player.shipClasses.length);
+            this.updateShipClass();
         } else if(keyCode === KEY_R) {
-            if(action.name === 'choose ship') {
-                this.ship_class_i = modulo(this.ship_class_i + 1,
-                    SHIP_CLASSES.size());
-                this.updateShipClass();
-            }
+            this.ship_class_i = modulo(this.ship_class_i + 1,
+                player.shipClasses.length);
+            this.updateShipClass();
         } else if(keyCode === KEY_ENTER) {
-            if(action.name === 'choose ship') {
-                this.game.unsetMenu();
-            }
+            this.game.unsetMenu();
         }
     }
     updateShipClass() {
         var old_ship = this.player.entity;
 
-        var cls = SHIP_CLASSES.getAt(this.ship_class_i);
+        var cls = player.shipClasses[this.ship_class_i];
         var ship = this.player.createShip(cls);
+
+        // Point the ship upwards
+        ship.rot = Math.PI / 2;
 
         if(old_ship) {
             ship.pos.copy(old_ship.pos);
@@ -2548,6 +2544,12 @@ class TitleMenu extends Menu {
         }
 
         this.game.camera.setTarget(ship);
+
+        this.subtitles = [
+            'Choose your ship',
+            '(Left/right arrow keys + Enter)',
+            '[' + cls.name + ']',
+        ];
     }
 }
 
@@ -2714,6 +2716,7 @@ class WarpMapMenu extends MapMenu {
 }
 
 class Effect extends Entity {
+    static name = 'Effect';
     fadeWithAge = true;
 }
 
@@ -2758,6 +2761,8 @@ class SparkEffect extends Effect {
 class Ship extends Entity {
     static maxhp = 100;
 
+    static name = 'Ship';
+
     die() {
         this.emitEffects(SmokeEffect, 4, {
             speed_min: 3,
@@ -2769,6 +2774,8 @@ class Ship extends Entity {
 }
 
 class FighterShip extends Ship {
+    static name = 'Fighter';
+
     radius = 7 * RADIUSMUL;
     thrustSpeed = 2;
     reverseSpeed = 1.25;
@@ -2798,6 +2805,7 @@ class FighterShip extends Ship {
 }
 
 class ScoutShip extends Ship {
+    static name = 'Scout';
     radius = 6 * RADIUSMUL;
 
     static maxhp = 100;
@@ -2874,6 +2882,7 @@ class ScoutShip extends Ship {
 }
 
 class RamShip extends Ship {
+    static name = 'Ram';
     radius = 7 * RADIUSMUL;
 
     thrustSpeed = 1.5;
@@ -3003,6 +3012,7 @@ class RamShip extends Ship {
 }
 
 class AssaultShip extends Ship {
+    static name = 'Assault';
     radius = 12 * RADIUSMUL;
     thrustSpeed = 1.25;
     reverseSpeed = .5;
@@ -3010,7 +3020,7 @@ class AssaultShip extends Ship {
     rotspeed = Math.PI / 26;
     rotmul = .65;
 
-    static maxhp = 120;
+    static maxhp = 100;
 
     shotClass = {
         x: TripleShot,
@@ -3028,6 +3038,7 @@ class AssaultShip extends Ship {
 }
 
 class TorchShip extends Ship {
+    static name = 'Torch';
     radius = 6 * RADIUSMUL;
     thrustSpeed = 1.45;
     reverseSpeed = 1;
@@ -3058,6 +3069,7 @@ class TorchShip extends Ship {
 }
 
 class HunterShip extends Ship {
+    static name = 'Hunter';
     radius = 10 * RADIUSMUL;
     thrustSpeed = 1;
     reverseSpeed = .5;
@@ -3243,6 +3255,7 @@ class HasTurretsShip extends Ship {
 }
 
 class TurretShip extends BaseTurretShip {
+    static name = 'Turret';
     radius = 6 * RADIUSMUL;
     thrustSpeed = .95;
     reverseSpeed = .55;
@@ -3271,6 +3284,7 @@ class FlagTurretShip extends TurretShip {
 }
 
 class FlagShip extends HasTurretsShip {
+    static name = 'Flagship';
     radius = 10.5 * RADIUSMUL;
     thrustSpeed = 1.25;
     reverseSpeed = 1.25;
@@ -3322,6 +3336,7 @@ class FlagShip extends HasTurretsShip {
 }
 
 class MoleShip extends Ship {
+    static name = 'Mole';
     radius = 6 * RADIUSMUL;
     thrustSpeed = 2.05;
     reverseSpeed = 1.15;
@@ -3473,6 +3488,7 @@ class MoleShip extends Ship {
 }
 
 class SuitShip extends Ship {
+    static name = 'Suit';
     radius = 6 * RADIUSMUL;
     thrustSpeed = .5;
     reverseSpeed = .5;
@@ -3630,6 +3646,7 @@ class SuitShip extends Ship {
 }
 
 class EngineerShip extends SuitShip {
+    static name = 'Engineer';
 
     shotClass = {
         x: ToolShot,
@@ -3656,6 +3673,7 @@ class EngineerShip extends SuitShip {
 }
 
 class TroopShip extends SuitShip {
+    static name = 'Troop';
     radius = 7 * RADIUSMUL;
 
     static maxhp = 95;
@@ -3688,7 +3706,8 @@ class TroopShip extends SuitShip {
     ]);
 }
 
-class ChomperShip extends Ship {
+class LionShip extends Ship {
+    static name = 'Lion';
     radius = 14 * RADIUSMUL;
     thrustSpeed = 3.25;
     reverseSpeed = 2.5;
@@ -3809,6 +3828,7 @@ function _initSwarmShip(leader) {
 }
 
 class SwarmTurretShip extends BaseTurretShip {
+    static name = 'Swarm';
     radius = 5 * RADIUSMUL;
 
     thrustSpeed = .7;
@@ -3828,6 +3848,7 @@ class SwarmTurretShip extends BaseTurretShip {
 }
 
 class SwarmShip extends HasTurretsShip {
+    static name = 'Swarm';
     radius = 6 * RADIUSMUL;
 
     static maxhp = 60;
@@ -3889,6 +3910,7 @@ class SwarmShip extends HasTurretsShip {
 }
 
 class Shot extends Entity {
+    static name = 'Shot';
 
     static initialShots = 1;
     static serialShots = 1;
@@ -4451,6 +4473,7 @@ class RopeShot extends Shot {
 }
 
 class Rock extends Entity {
+    static name = 'Rock';
 
     circleStrokeStyle = '#987';
     velmul = 1;
@@ -4571,7 +4594,7 @@ var SHIP_CLASSES = new OrderedDict()
     .set('turret', TurretShip)
     .set('flag', FlagShip)
     .set('mole', MoleShip)
-    .set('chomper', ChomperShip)
+    .set('lion', LionShip)
     .set('ram', RamShip)
     .set('hunter', HunterShip)
     .set('swarm', SwarmShip)
@@ -4653,7 +4676,7 @@ var defaultMap = new function() {
     turret
     flag
     mole
-    chomper
+    lion
     ram
     hunter
     swarm
@@ -4670,7 +4693,7 @@ var defaultMap = new function() {
         They like asteroids. Miners?..
         Assault, hunter, swarm?..
     Red team:
-        torch, ram, chomper, troop?.. is the fire motif too obvious? :P
+        torch, ram, lion, troop?.. is the fire motif too obvious? :P
 
     Asteroid belt:
         Sweeps kind of northwest to southeast across the map
@@ -4703,17 +4726,31 @@ var defaultMap = new function() {
                     'There are 4 teams of ships: green, blue, yellow, red.',
                     'Each team is fighting all the others.',
                     'Ships on the same team can\'t damage each other.',
+                    '',
+                    'Bumping into asteroids doesn\'t damage you!',
+                    'However, shooting them open may reveal pickups like',
+                    'extra health...',
+                    '',
+                    '(Remember to use the "W" key to warp to next screen',
+                    'once you\'re done on this one!)',
                 ]),
                 ships_per: new MinMax(.5),
                 ships: mkships({
                     blue: {fighter: 1},
                 }),
-            }), {basic1: 2, corridor0: 3}),
+            }), {basic1: 1}),
         basic1: defnode('Basic Training',
-            mktemplate({ships: mkships({
-                green: {fighter: 1, assault: .5, flag: .5},
-                yellow: {fighter: 1, scout: 2},
-            })}), {basic2: 2}),
+            mktemplate({
+                text: new Text('Teams', [
+                    'When warping between areas, check the ',
+                    'Each team is fighting all the others.',
+                    'Ships on the same team can\'t damage each other.',
+                ]),
+                ships_per: new MinMax(.5),
+                ships: mkships({
+                    blue: {fighter: 1},
+                }),
+            }), {basic2: 2}),
         basic2: defnode('Basic Training',
             mktemplate({ships: mkships({
                 green: {fighter: .5, assault: 1, flag: .5},
@@ -4739,7 +4776,7 @@ var defaultMap = new function() {
 
         // CORRIDOR
         // A series of wide fields, with not many rocks, stars, or planets.
-        // Mostly blue team (assault+hunter), with some red (chomper+hunter).
+        // Mostly blue team (assault+hunter), with some red (lion+hunter).
         // Maybe the first time you meet hunters?..
         corridor0: defnode('Corridor',
             mktemplate({
@@ -4752,7 +4789,7 @@ var defaultMap = new function() {
                 ships: mkships({
                     green: {fighter: 1},
                     blue: {assault: 1, hunter: .5},
-                    red: {chomper: 1},
+                    red: {lion: 1},
                 }),
             }), {corridor1: 4}),
         corridor1: defnode('Corridor',
@@ -4766,7 +4803,7 @@ var defaultMap = new function() {
                 planets_per: new MinMax(.2),
                 ships: mkships({
                     blue: {assault: 1, hunter: .5},
-                    red: {chomper: 1, hunter: .5},
+                    red: {lion: 1, hunter: .5},
                 }),
             }), {corridor2: 4}),
         corridor2: defnode('Corridor',
@@ -4780,7 +4817,7 @@ var defaultMap = new function() {
                 planets_per: new MinMax(.2),
                 ships: mkships({
                     blue: {assault: 1, hunter: .5, flag: .5},
-                    red: {chomper: 1, hunter: .5, ram: 1},
+                    red: {lion: 1, hunter: .5, ram: 1},
                 }),
             }), {rock0: 3}),
 
@@ -4796,7 +4833,7 @@ var defaultMap = new function() {
                     green: {mole: 1, troop: 1},
                     blue: {mole: 1, troop: 1},
                     yellow: {mole: 1, engineer: 1},
-                    red: {chomper: 1},
+                    red: {lion: 1},
                 }),
             }), {rock1: 2}),
         rock1: defnode('Rock',
@@ -4832,7 +4869,7 @@ game.mapKey(player.keys.r, KEY_R);
 game.mapKey(player.keys.x, KEY_SPACE);
 game.mapKey(player.keys.y, KEY_SHIFT);
 
-game.setMenu(TitleMenu);
+game.setMenu(ChooseShipMenu);
 
 game.play();
 canvas.style.border = 'none';
