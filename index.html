@@ -62,8 +62,6 @@ body {
 * still be holding Up while you're in the menu choosing ships)
 * (Is this... already done?)
 *
-* FieldTemplate should include probabilities for getting energy and fuel
-*
 * Seems like one end of RopeShot can get stuck to something and live forever...
 *
 * MapMenu should render nodes with size & colour indicating a bit of what
@@ -125,6 +123,8 @@ var DEFAULT_ROCKS_PER    = 1 /  300000;
 var DEFAULT_PLANETS_PER  = 1 / 1000000;
 var DEFAULT_SHIPS_PER    = 1 /  500000;
 var DEFAULT_STAR_SPEED = 3;
+var DEFAULT_ENERGY_CHANCE = .05;
+var DEFAULT_FUEL_CHANCE = .1;
 
 // keyCode values
 var KEY_U = 38;
@@ -788,6 +788,9 @@ class FieldTemplate {
     star_speed = new MinMax(
         DEFAULT_STAR_SPEED - 1.6, DEFAULT_STAR_SPEED + 1.5);
 
+    energy_chance = DEFAULT_ENERGY_CHANCE;
+    fuel_chance = DEFAULT_FUEL_CHANCE;
+
     ships = new WeightedArray();
 
     constructor(props) {
@@ -1089,6 +1092,8 @@ class Field {
         this.rocks = this.addEntityArray();
         this.pickups = this.addEntityArray();
 
+        this.template = null;
+
         /* Create a canvas for rendering this Field.
         This canvas is never attached to a parent element, we only
         use it for drawing, then copy its image onto another canvas. */
@@ -1097,6 +1102,8 @@ class Field {
         this.innerCanvas.height = this.size.y;
     }
     populate(template) {
+        this.template = template;
+
         var area = this.size.area();
         var n_stars = area * template.stars_per.getRand();
         var n_rocks = area * template.rocks_per.getRand();
@@ -4794,8 +4801,12 @@ class Rock extends Entity {
             velmul: .65,
         });
 
-        if(Math.random() < .2) this.emitPickup(EnergyPickup);
-        if(Math.random() < .2) this.emitPickup(FuelPickup);
+        if(Math.random() < this.field.template.energy_chance) {
+            this.emitPickup(EnergyPickup);
+        }
+        if(Math.random() < this.field.template.fuel_chance) {
+            this.emitPickup(FuelPickup);
+        }
 
         super.die();
     }
