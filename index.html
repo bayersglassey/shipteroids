@@ -2279,7 +2279,7 @@ class Pickup extends Entity {
         super(field);
 
         var r = Random.randInt(3);
-        this.radius = (4 + 2 * r) * RADIUSMUL;
+        this.radius = (4 + 1.5 * r) * RADIUSMUL;
         this.pickupAmount = r * 10;
     }
     handleCollision(other) {
@@ -3130,6 +3130,14 @@ class ScoutShip extends Ship {
         }
 
         super.step();
+    }
+    stepCPUKey(key) {
+        if(key.name === 'y') {
+            if(Math.random() < .05) key.down();
+            if(Math.random() < .05) key.up();
+        } else {
+            super.stepCPUKey(key);
+        }
     }
 }
 
