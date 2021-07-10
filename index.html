@@ -252,6 +252,9 @@ class Text {
         this.title = title;
         this.lines = lines;
     }
+    clone() {
+        return new this.constructor(this.title, this.lines.splice());
+    }
     render(canvas) {
         var ctx = canvas.getContext('2d');
         ctx.fillStyle = '#fff';
@@ -765,6 +768,8 @@ class FieldTemplate {
                 props[name] = thisProp.clone();
             } else if(thisProp instanceof WeightedArray) {
                 props[name] = thisProp.clone();
+            } else if(thisProp instanceof Text) {
+                props[name] = thisProp.clone();
             } else if(typeof thisProp !== 'object' || thisProp === null) {
                 // number, string, null
                 props[name] = thisProp;
@@ -796,12 +801,17 @@ class FieldTemplate {
                 props[name] = thisProp.clone().addNormalized(otherProp, m);
             } else if(typeof thisProp === 'number') {
                 props[name] = linear(thisProp, otherProp, m);
-            } else if(typeof thisProp === 'string' || typeof otherProp === 'string') {
+            } else if(
+                thisProp instanceof Text ||
+                otherProp instanceof Text ||
+                typeof thisProp === 'string' ||
+                typeof otherProp === 'string'
+            ) {
                 if(m === 0) props[name] = thisProp;
                 else if(m === 1) props[name] = otherProp;
                 else if(thisProp === otherProp) props[name] = thisProp;
                 else {
-                    // Don't bother trying to "interpolate" text.
+                    // Don't bother trying to "interpolate"
                 }
             } else if(thisProp === null || otherProp === null) {
                 props[name] = null;
@@ -1996,7 +2006,24 @@ class Entity extends Sprite {
         (Subclasses are free to answer that question in various ways...) */
 
         if(this.is_warping && !this.isAlly(other)) {
-            this.abortWarp();
+            var warp_damage = 10;
+            this.damage(warp_damage);
+
+            // ???...
+            // If we don't do this, we could take warp_damage every frame
+            // we're touching other...
+            other.die();
+
+            this.emitEffects(SmokeEffect, 4, {
+                speed_min: 3,
+                speed_max: 6,
+                velmul: .65,
+            });
+            this.emitEffects(SparkEffect, 4, {
+                speed_min: 3,
+                speed_max: 6,
+                velmul: .65,
+            });
         }
     }
     handleCollisionPhysics(other) {
@@ -2075,24 +2102,6 @@ class Entity extends Sprite {
             this.field.game.setMenu(WarpMapMenu);
             this.die();
         }
-    }
-    abortWarp() {
-        var warp_damage = 10;
-        this.damage(warp_damage);
-
-        this.emitEffects(SmokeEffect, 4, {
-            speed_min: 3,
-            speed_max: 6,
-            velmul: .65,
-        });
-        this.emitEffects(SparkEffect, 4, {
-            speed_min: 3,
-            speed_max: 6,
-            velmul: .65,
-        });
-
-        this.is_warping = false;
-        this.warping_counter = 0;
     }
     render(canvas, camera) {
         var fade = 1;
@@ -2585,7 +2594,13 @@ class MapMenu extends Menu {
             lines.push('Distance: ' + this.edge.getLen());
         }
 
+        this.addControls(lines);
+
         this.text = new Text(title, lines);
+    }
+    addControls(lines) {
+        lines.push('');
+        lines.push('Left/right: select branch (if current path branches)');
     }
     setNode(node, edge_i) {
         this.node = node;
@@ -2657,6 +2672,10 @@ class MapMenu extends Menu {
 class TabMapMenu extends MapMenu {
     /* Menu player sees while holding tab (to view the entire map) */
 
+    addControls(lines) {
+        super.addControls(lines);
+        lines.push('Up        : follow branch');
+    }
     keyDown(keyCode) {
         if(keyCode === KEY_U) {
             this.setNode(this.edge.getNode1());
@@ -2669,6 +2688,10 @@ class TabMapMenu extends MapMenu {
 class WarpMapMenu extends MapMenu {
     /* Menu player uses to choose where to warp to next */
 
+    addControls(lines) {
+        super.addControls(lines);
+        lines.push('Enter     : warp');
+    }
     keyDown(keyCode) {
         if(keyCode === KEY_ENTER) {
             var progress = this.game.progress;
@@ -4664,7 +4687,10 @@ var defaultMap = new function() {
                     'Spacebar  : fire weapon / use ability #1',
                     'Shift     : fire weapon / use ability #2',
                     'Escape    : open menu',
+                    'Tab       : hold to view map',
                     'W         : attempt to warp to next area',
+                    '            ...careful! You take damage if you',
+                    '            collide with anything while warping',
                 ]),
             }), {basic0: 1}),
 
@@ -4672,10 +4698,17 @@ var defaultMap = new function() {
         // A circular set of fields, introducing you to the most common
         // types of ship.
         basic0: defnode('Basic Training',
-            mktemplate({ships: mkships({
-                green: {fighter: 1, scout: .5, assault: .5},
-                blue: {fighter: 1, assault: 1},
-            })}), {basic1: 2, corridor0: 3}),
+            mktemplate({
+                text: new Text('Teams', [
+                    'There are 4 teams of ships: green, blue, yellow, red.',
+                    'Each team is fighting all the others.',
+                    'Ships on the same team can\'t damage each other.',
+                ]),
+                ships_per: new MinMax(.5),
+                ships: mkships({
+                    blue: {fighter: 1},
+                }),
+            }), {basic1: 2, corridor0: 3}),
         basic1: defnode('Basic Training',
             mktemplate({ships: mkships({
                 green: {fighter: 1, assault: .5, flag: .5},
