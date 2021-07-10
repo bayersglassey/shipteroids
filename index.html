@@ -14,12 +14,32 @@ body {
     width: 100%;
     text-align: center;
 }
+.controls {
+    width: 100%;
+    text-align: center;
+}
+.controls-table {
+    margin: auto;
+}
 </style>
 </head>
 <body>
 <div class="canvas-container">
     <canvas id="canvas" class="canvas" width=700 height=700 tabindex=-1></canvas>
 </div>
+<div class="controls">
+    <h2>Controls</h2>
+    <table class="controls-table">
+        <tr><td><b>Left / right</b></td><td>Turn left / right</td></tr>
+        <tr><td><b>Up / down</b></td><td>Thrust / reverse</td></tr>
+        <tr><td><b>Spacebar</b></td><td>Fire weapon / use ability #1</td></tr>
+        <tr><td><b>Shift</b></td><td>Fire weapon / use ability #2</td></tr>
+        <tr><td><b>W</b></td><td>Attempt to warp to next area</td></tr>
+        <tr><td><b>Tab</b></td><td>Hold to view map</td></tr>
+        <tr><td><b>Escape</b></td><td>Open menu</td></tr>
+    </table>
+</div>
+
 <script>
 
 'use strict';
@@ -42,11 +62,9 @@ body {
 * still be holding Up while you're in the menu choosing ships)
 * (Is this... already done?)
 *
-* Seems like one end of RopeShot can get stuck to something and live forever...
+* FieldTemplate should include probabilities for getting energy and fuel
 *
-* Coming up for "themes" for map areas (templates).
-* One easy way: one area for each pair of ship types.
-* Like "what does fighters vs assaults look like?" could be one area.
+* Seems like one end of RopeShot can get stuck to something and live forever...
 *
 * MapMenu should render nodes with size & colour indicating a bit of what
 * you'll find there.
@@ -92,7 +110,12 @@ var WARP_RADIUS = 10 * RADIUSMUL;
 var WARP_AFTER_STEPS = 30;
 var WARP_RADIUS = 10;
 var MAX_WARP_ADDRADIUS = 16;
+var MAX_ROT_VEL = Math.PI / 5;
 var DEFAULT_ADDHP = 1 / 40;
+var DEFAULT_ADDFUEL = 1 / 80;
+var DEFAULT_MAXFUEL = 100;
+var WARP_COLLISION_DAMAGE = 10;
+var WARP_FUEL = 10;
 
 // Game/field default options
 var DEFAULT_FIELD_WIDTH  = 1000;
@@ -190,6 +213,16 @@ function linear(x0, x1, n) {
 
 function getDefault(value, default_value) {
     return value === undefined? default_value: value;
+}
+
+function range(a, b) {
+    if(b === undefined) {
+        b = a;
+        a = 0;
+    }
+    var values = [];
+    for(var i = a; i < b; i++) values.push(i);
+    return values;
 }
 
 function modulo(x, n) {
@@ -1054,6 +1087,7 @@ class Field {
         this.shots = this.addEntityArray();
         this.effects = this.addEntityArray();
         this.rocks = this.addEntityArray();
+        this.pickups = this.addEntityArray();
 
         /* Create a canvas for rendering this Field.
         This canvas is never attached to a parent element, we only
@@ -1163,6 +1197,11 @@ class Field {
         this.rocks.pending.push(entity);
         return entity;
     }
+    addPickup(cls) {
+        var entity = new cls(this);
+        this.pickups.pending.push(entity);
+        return entity;
+    }
     addPlanet(cls) {
         var entity = new cls(this);
         this.planets.pending.push(entity);
@@ -1246,6 +1285,13 @@ class Field {
                     rock.handleCollisionPhysics(ship);
                 }
             }
+            for(var pickup of this.pickups) {
+                if(rock.colliding(pickup)) {
+                    rock.handleCollision(pickup);
+                    pickup.handleCollision(rock);
+                    rock.handleCollisionPhysics(pickup);
+                }
+            }
         }
 
         for(var i = 0; i < this.ships.length; i++) {
@@ -1256,6 +1302,13 @@ class Field {
                     ship.handleCollision(other);
                     other.handleCollision(ship);
                     ship.handleCollisionPhysics(other);
+                }
+            }
+            for(var pickup of this.pickups) {
+                if(ship.colliding(pickup)) {
+                    ship.handleCollision(pickup);
+                    pickup.handleCollision(ship);
+                    ship.handleCollisionPhysics(pickup);
                 }
             }
         }
@@ -1752,6 +1805,9 @@ class Entity extends Sprite {
         // May be overridden by subclasses
         return false;
     }
+    setHp(hp) {
+        this.hp = hp > this.maxhp? this.maxhp: hp;
+    }
     heal(addhp) {
         if((this.hp += addhp) > this.maxhp) this.hp = this.maxhp;
     }
@@ -1824,6 +1880,9 @@ class Entity extends Sprite {
         }
     }
     stepPhysics() {
+        if(this.rot_vel < -MAX_ROT_VEL) this.rot_vel = -MAX_ROT_VEL;
+        if(this.rot_vel > MAX_ROT_VEL) this.rot_vel = MAX_ROT_VEL;
+
         this.vel.mul(this.velmul);
         this.rot += this.rot_vel * ROTVELMUL;
         this.rot_vel *= this.rotmul;
@@ -1901,7 +1960,23 @@ class Entity extends Sprite {
             effect.rot = rot;
         }
     }
+    emitPickup(cls, opts) {
+        opts = opts || EMPTY;
+        var speed_min = getDefault(opts.speed_min, 2);
+        var speed_max = getDefault(opts.speed_max, 5);
+        var velmul = getDefault(opts.velmul, .75);
+
+        var pickup = this.field.addPickup(cls);
+        pickup.rot = this.rot;
+        pickup.pos.copy(this.pos);
+        var speed = Random.randNumber(speed_min, speed_max);
+        pickup.vel.copy(this.vel).mul(velmul)
+            .addSpeed(speed, Random.randRotation());
+
+        return pickup;
+    }
     emitEffects(cls, n_effects, opts) {
+        opts = opts || EMPTY;
         var speed_min = getDefault(opts.speed_min, 0);
         var speed_max = getDefault(opts.speed_max, 0);
         var velmul = getDefault(opts.velmul, 0);
@@ -2015,8 +2090,7 @@ class Entity extends Sprite {
         (Subclasses are free to answer that question in various ways...) */
 
         if(this.is_warping && !this.isAlly(other)) {
-            var warp_damage = 10;
-            this.damage(warp_damage);
+            this.damage(WARP_COLLISION_DAMAGE);
 
             // ???...
             // If we don't do this, we could take warp_damage every frame
@@ -2101,6 +2175,9 @@ class Entity extends Sprite {
         this.vel.addSpeed(this.thrustSpeed * 5, this.rot);
     }
     finishWarp() {
+        var player = this.getPlayer();
+        player.useFuel(WARP_FUEL);
+
         var progress = this.field.game.progress;
         if(progress.canProceed()) {
             // Immediately warp to next area
@@ -2109,6 +2186,8 @@ class Entity extends Sprite {
         } else {
             // Pop up a menu, so player can choose where to warp to next
             this.field.game.setMenu(WarpMapMenu);
+            var player = this.getPlayer();
+            player.shipHp = this.hp;
             this.die();
         }
     }
@@ -2184,9 +2263,116 @@ class Camera extends FieldParticle {
     }
 }
 
+class Pickup extends Entity {
+    static name = 'Pickup';
+
+    radius = 6 * RADIUSMUL;
+    velmul = .95;
+
+    circleStrokeStyle = 'rgb(255,255,255,.75)';
+    circleFillStyle   = 'rgba(255,255,255,.15)';
+    circleLineWidth = 2;
+
+    picture = Picture.newPolygon(3);
+
+    constructor(field) {
+        super(field);
+
+        var r = Random.randInt(3);
+        this.radius = (4 + 2 * r) * RADIUSMUL;
+        this.pickupAmount = r * 10;
+    }
+    handleCollision(other) {
+        if(other instanceof Ship) {
+            this.handlePickedUp(other);
+        }
+        super.handleCollision(other);
+    }
+    handlePickedUp(other) {
+        this.die();
+    }
+    die() {
+        this.emitEffects(PickupEffect, 6, {
+            speed_min: 3,
+            speed_max: 6,
+            velmul: .65,
+        });
+        super.die();
+    }
+}
+
+class EnergyPickup extends Pickup {
+    static name = 'Energy';
+
+    circleStrokeStyle = 'rgb(80,200,200)';
+    picture = new Picture([new Shape([
+        // Top
+        new Point(-1 , -1 ),
+        new Point( 1 , -1 ),
+        new Point( 1 , -.7),
+        new Point(-.5, -.7),
+
+        // Middle
+        new Point(-.5, -.2),
+        new Point( .5, -.2),
+        new Point( .5,  .2),
+        new Point(-.5,  .2),
+
+        // Bottom
+        new Point(-.5,  .7),
+        new Point( 1 ,  .7),
+        new Point( 1 ,  1 ),
+        new Point(-1 ,  1 ),
+    ])]);
+
+    handlePickedUp(other) {
+        other.heal(this.pickupAmount);
+        super.handlePickedUp(other);
+    }
+}
+
+class FuelPickup extends Pickup {
+    static name = 'Fuel';
+
+    circleStrokeStyle = 'rgb(180,65,0)';
+    picture = new Picture([new Shape([
+        // Top
+        new Point(-1 , -1 ),
+        new Point( 1 , -1 ),
+        new Point( 1 , -.7),
+        new Point(-.5, -.7),
+
+        // Middle
+        new Point(-.5, -.2),
+        new Point( .5, -.2),
+        new Point( .5,  .2),
+        new Point(-.5,  .2),
+
+        // Bottom
+        new Point(-.5,  1 ),
+        new Point(-1 ,  1 ),
+    ])]);
+
+    handlePickedUp(other) {
+        var player = other.getPlayer();
+        if(player) {
+            player.addFuel(this.pickupAmount);
+        }
+        super.handlePickedUp(other);
+    }
+}
+
 class Player {
 
     shipClass = null;
+
+    // shipHp: saved between areas when warping.
+    // MAYBE TODO: make a new class, StuffToSave or whatever, so we can
+    // save more than just hp?..
+    shipHp = null;
+
+    maxfuel = DEFAULT_MAXFUEL;
+    fuel = DEFAULT_MAXFUEL / 2;
 
     shipClasses = DEBUG? SHIP_CLASSES.getValues():
         [FighterShip, ScoutShip, AssaultShip];
@@ -2196,6 +2382,20 @@ class Player {
         this.entity = null;
         this.team = TEAMS.get('green');
         this.keys = Key.createKeys();
+    }
+    addFuel(fuel) {
+        this.fuel += fuel;
+        if(this.fuel > this.maxfuel) this.fuel = this.maxfuel;
+    }
+    useFuel(fuel) {
+        this.fuel -= fuel;
+        if(this.fuel < 0) this.fuel = 0;
+    }
+    canWarp() {
+         return this.fuel >= WARP_FUEL;
+    }
+    beginWarp() {
+        this.entity.beginWarp();
     }
     setTeam(team) {
         this.team = team;
@@ -2217,11 +2417,15 @@ class Player {
         var ship = this.game.addShip(cls);
         ship.pos.setRandomWithin(this.game.field.size);
         ship.rot = Random.randRotation();
+        if(this.shipHp !== null) ship.setHp(this.shipHp);
         this.setEntity(ship);
         return ship;
     }
     step() {
         if(!this.entity) return;
+
+        if(this.fuel < WARP_FUEL) this.addFuel(DEFAULT_ADDFUEL);
+
         for(var keyname of Key.KEYNAMES) {
             var key = this.keys[keyname];
             this.entity.keys[keyname].copy(key);
@@ -2323,7 +2527,10 @@ class Game {
             // HACK!
             var ship = this.camera.target;
             if(ship && ship.canWarp()) {
-                ship.beginWarp();
+                var player = ship.getPlayer();
+                if(player && player.canWarp()) {
+                    player.beginWarp();
+                }
             }
         } else {
             var key = this.keysByCode[keyCode];
@@ -2395,17 +2602,23 @@ class Game {
         ctx.textAlign = 'center';
         ctx.font = 'normal bold 24px sans-serif';
 
+        var lineHeight = 20;
+
         var x = canvas.width / 2;
-        var y = canvas.height - 24;
+        var y = canvas.height - lineHeight * 2;
 
-        var text = parseInt(entity.hp) + ' / ' + entity.maxhp;
-        ctx.fillText(text, x, y);
-        y += 20;
-
+        var text = 'E: ' + parseInt(entity.hp) + ' / ' + entity.maxhp;
         if(entity.rock) {
-            var text = parseInt(entity.rock.hp) + ' / ' + entity.rock.maxhp;
+            text += ' (' + parseInt(entity.rock.hp) + ' / ' + entity.rock.maxhp + ')';
+        }
+        ctx.fillText(text, x, y);
+        y += lineHeight;
+
+        var player = entity.getPlayer();
+        if(player) {
+            var text = 'F: ' + parseInt(player.fuel) + ' / ' + player.maxfuel;
             ctx.fillText(text, x, y);
-            y += 20;
+            y += lineHeight;
         }
     }
     renderTitle(title, subtitles) {
@@ -2520,6 +2733,10 @@ class ChooseShipMenu extends Menu {
     }
     updateShipClass() {
         var old_ship = this.player.entity;
+
+        // Set shipHp to null, so that player.createShip doesn't try
+        // to set new ship's hp to old ship's.
+        this.player.shipHp = null;
 
         var cls = player.shipClasses[this.ship_class_i];
         var ship = this.player.createShip(cls);
@@ -2692,7 +2909,7 @@ class WarpMapMenu extends MapMenu {
 
     addControls(lines) {
         super.addControls(lines);
-        lines.push('Enter     : warp');
+        lines.push('Enter     : finish warping');
     }
     keyDown(keyCode) {
         if(keyCode === KEY_ENTER) {
@@ -2727,6 +2944,41 @@ class SmokeEffect extends Effect {
     circleStrokeStyle = 'transparent';
     circleFillStyle = 'rgba(200,200,200,.2)';
     velmul = 1;
+    maxAge = 20;
+}
+
+class PickupEffect extends Effect {
+    radius = 4 * RADIUSMUL;
+
+    circleStrokeStyle = 'transparent';
+    circleFillStyle = 'rgba(255,255,255,.3)';
+    picture = Picture.newPolygon(4);
+
+    velmul = .95;
+    maxAge = 20;
+}
+
+class SnowflakeEffect extends Effect {
+    radius = 4 * RADIUSMUL;
+
+    circleStrokeStyle = 'rgb(255,255,255,.5)';
+
+    picture = new Picture([
+        new Shape([
+            Point.unit(0 / 6),
+            Point.unit(3 / 6),
+        ], {fill: false}),
+        new Shape([
+            Point.unit(1 / 6),
+            Point.unit(4 / 6),
+        ], {fill: false}),
+        new Shape([
+            Point.unit(2 / 6),
+            Point.unit(5 / 6),
+        ], {fill: false}),
+    ]);
+
+    velmul = .85;
     maxAge = 20;
 }
 
@@ -4294,12 +4546,12 @@ class ToolShot extends Shot {
 
     picture = new Picture([
         new Shape([
-            new Point(-1,  0),
-            new Point( 1,  0),
+            Point.unit(0 / 4),
+            Point.unit(2 / 4),
         ], {fill: false}),
         new Shape([
-            new Point( 0, -1),
-            new Point( 0,  1),
+            Point.unit(1 / 4),
+            Point.unit(3 / 4),
         ], {fill: false}),
     ]);
 }
@@ -4533,6 +4785,10 @@ class Rock extends Entity {
             speed_max: 6,
             velmul: .65,
         });
+
+        if(Math.random() < .2) this.emitPickup(EnergyPickup);
+        if(Math.random() < .2) this.emitPickup(FuelPickup);
+
         super.die();
     }
 }
@@ -4704,16 +4960,13 @@ var defaultMap = new function() {
             mktemplate({
                 rocks_per: new MinMax(0),
                 rocksText: 'SHIPteroids',
-                text: new Text('Controls', [
-                    'Left/right: turn left/right',
-                    'Up/down   : thrust/reverse',
-                    'Spacebar  : fire weapon / use ability #1',
-                    'Shift     : fire weapon / use ability #2',
-                    'Escape    : open menu',
-                    'Tab       : hold to view map',
-                    'W         : attempt to warp to next area',
-                    '            ...careful! You take damage if you',
-                    '            collide with anything while warping',
+                text: new Text('Welcome to Shipteroids!', [
+                    'Try out your new ship. This area is safe.',
+                    '',
+                    'Press W to warp to next area.',
+                    'While warping, you take ' + WARP_COLLISION_DAMAGE
+                        + ' damage if you hit anything,',
+                    'so be careful!',
                 ]),
             }), {basic0: 1}),
 
@@ -4722,17 +4975,13 @@ var defaultMap = new function() {
         // types of ship.
         basic0: defnode('Basic Training',
             mktemplate({
-                text: new Text('Teams', [
-                    'There are 4 teams of ships: green, blue, yellow, red.',
-                    'Each team is fighting all the others.',
-                    'Ships on the same team can\'t damage each other.',
+                text: new Text('Watch out!', [
+                    'It\'s another ship! This one is hostile.',
                     '',
-                    'Bumping into asteroids doesn\'t damage you!',
-                    'However, shooting them open may reveal pickups like',
-                    'extra health...',
+                    'You can warp to next area at any time with "W".',
                     '',
-                    '(Remember to use the "W" key to warp to next screen',
-                    'once you\'re done on this one!)',
+                    'Getting shot costs you energy (E); warping costs fuel (F).',
+                    'Shoot asteroids apart to find more.',
                 ]),
                 ships_per: new MinMax(.5),
                 ships: mkships({
@@ -4742,7 +4991,7 @@ var defaultMap = new function() {
         basic1: defnode('Basic Training',
             mktemplate({
                 text: new Text('Teams', [
-                    'When warping between areas, check the ',
+                    'There are 4 teams of ships: green, blue, yellow, red.',
                     'Each team is fighting all the others.',
                     'Ships on the same team can\'t damage each other.',
                 ]),
@@ -4761,7 +5010,7 @@ var defaultMap = new function() {
                 green: {assault: 1, scout: 1},
                 yellow: {fighter: 1, mole: 1},
                 red: {torch: 1},
-            })}), {basic0: 2, fire0: 4}),
+            })}), {basic0: 2, fire0: 4, corridor0: 2}),
 
         // FIRE
         // A place full of torches and rams. Presumably red team's home base.
