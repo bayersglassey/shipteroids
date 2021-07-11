@@ -63,8 +63,6 @@ body {
 *
 * TODO:
 *
-* Effect while you're warping. (Expanding circles?..)
-*
 * MapMenu: when you're partway across an edge, your position should be shown
 * accordingly.
 * Also, your destination (node1) needs to be highlighted, and it needs to
@@ -326,7 +324,7 @@ class Text {
         this.lines = lines;
     }
     clone() {
-        return new this.constructor(this.title, this.lines.splice());
+        return new this.constructor(this.title, this.lines.slice());
     }
     render(canvas) {
         var ctx = canvas.getContext('2d');
@@ -1965,7 +1963,15 @@ class Entity extends Sprite {
 
         if(this.is_warping) {
             var speed = this.thrustSpeed * 2 / Math.pow(this.velmul, 3);
-            this.thrust(speed, this.rot);
+            this.thrust(speed, this.rot, {cls: null});
+            if(this.age % 3 === 0) {
+                this.addThrustEffects(speed, this.rot + Math.PI, {
+                    cls: WarpEffect,
+                    n_effects: 1,
+                    velmul: 0,
+                    posrot: Math.PI / 2,
+                });
+            }
 
             this.warping_counter++;
             if(this.warping_counter > WARP_AFTER_STEPS) {
@@ -2043,12 +2049,10 @@ class Entity extends Sprite {
     turn(rot) {
         this.rot_vel += rot;
     }
-    thrust(speed, rot) {
+    thrust(speed, rot, effect_opts) {
         this.vel.addSpeed(speed, rot);
         if(this.thrustEffectCooldown === 0) {
-            if(this.thrustEffectClass) {
-                this.addThrustEffects(speed, rot + Math.PI);
-            }
+            this.addThrustEffects(speed, rot + Math.PI, effect_opts);
             this.thrustEffectCooldown += this.thrustEffectEvery;
         }
     }
@@ -2059,6 +2063,8 @@ class Entity extends Sprite {
         var velmul = getDefault(opts.velmul, this.thrustEffectVelMul);
         var speedmul = getDefault(opts.speedmul, this.thrustEffectSpeedMul);
         var posrot = getDefault(opts.posrot, this.thrustEffectPosRot);
+
+        if(!cls) return;
 
         for(var i = 0; i < n_effects; i++) {
             var effect = this.field.addEffect(cls);
@@ -3055,6 +3061,22 @@ class Effect extends Entity {
     fadeWithAge = true;
 }
 
+class WarpEffect extends Effect {
+    radius = 2 * RADIUSMUL;
+    shouldRenderCircle = true;
+    shouldRenderCircleLine = false;
+    circleStrokeStyle = 'rgba(0,255,255,.75)';
+    circleFillStyle = 'transparent';
+
+    velmul = .6;
+    maxAge = 20;
+
+    step() {
+        this.radius += .5 * RADIUSMUL;
+        super.step();
+    }
+}
+
 class SmokeEffect extends Effect {
     radius = 7 * RADIUSMUL;
     shouldRenderCircle = true;
@@ -3526,15 +3548,19 @@ class HunterShip extends Ship {
         if(this.cloaked) return;
         super.fire(keyname);
     }
-    thrust(speed, rot) {
+    thrust(speed, rot, effect_opts) {
         if(this.cloaked) speed *= 2;
-        super.thrust(speed, rot);
+        super.thrust(speed, rot, effect_opts);
+    }
+    canWarp() {
+        if(this.cloaked) return false;
+        return super.canWarp();
     }
     step() {
 
         var keyname = 'y';
         var shotprops = this.shotprops[keyname];
-        if(shotprops.cooldown === 0) {
+        if(shotprops.cooldown === 0 && !this.is_warping) {
             var cloaked = this.keys[keyname].wasDown;
             if(cloaked != this.cloaked) {
                 this.cloaked = cloaked;
@@ -3630,13 +3656,22 @@ class HasTurretsShip extends Ship {
     }
     step() {
         super.step();
-        if(this.turrets.length < this.max_turrets) {
+        if(this.turrets.length < this.max_turrets && !this.is_warping) {
             if(this.turret_cooldown) {
                 this.turret_cooldown--;
             } else {
                 this.addTurret();
             }
         }
+    }
+    beginWarp() {
+
+        // Clone the array before iterating, since turret.die() calls
+        // turret.remove() which removes the turret from this.turrets
+        var turrets = this.turrets.slice();
+        for(var turret of turrets) turret.die();
+
+        super.beginWarp();
     }
     renderTurretLines(canvas, camera, addx, addy) {
         var ctx = canvas.getContext('2d');
@@ -3854,14 +3889,14 @@ class MoleShip extends Ship {
             shot.addpos.addSpeed(rock.radius - this.radius, this.rot);
         }
     }
-    thrust(speed, rot) {
+    thrust(speed, rot, effect_opts) {
         var rock = this.rock;
         if(rock) {
             var mul = DEFAULT_ROCK_RADIUS / rock.radius;
             if(mul > 1) mul = 1;
             rock.vel.addSpeed(speed * mul, rot);
         }
-        super.thrust(speed, rot);
+        super.thrust(speed, rot, effect_opts);
     }
     turn(rot) {
         var rock = this.rock;
@@ -4191,8 +4226,8 @@ class CrabShip extends Ship {
     }
     fire(keyname) {
         if(keyname === 'y') {
-            this.thrust(this.chomp_thrust, this.rot);
-            this.addThrustEffects(-2, this.rot, {
+            this.thrust(this.chomp_thrust, this.rot, {cls: null});
+            this.addThrustEffects(2, this.rot + Math.PI, {
                 cls: FlameSmokeEffect,
                 n_effects: 3,
                 velmul: 0,
