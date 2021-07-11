@@ -1534,19 +1534,19 @@ class Picture {
         var shape = Shape.newPolygon(n_points, opts);
         return new this([shape], props);
     }
-    render(entity, canvas, camera, addx, addy) {
-        var x0 = entity.pos.x + addx;
-        var y0 = entity.pos.y + addy;
-        var rot = entity.rot;
-        var radius = entity.radius * this.radiusmul;
+    render(canvas, x0, y0, rot, radius, opts) {
+        opts = opts || EMPTY;
+        var strokeStyle = getDefault(opts.strokeStyle, 'rgb(255,255,255)');
+        var lineWidth = getDefault(opts.lineWidth, 2);
+        var fillStyle = getDefault(opts.fillStyle, 'rgba(255,255,255,.25)');
 
         // Point used for calculations
         var p = new Point();
 
         var ctx = canvas.getContext('2d');
-        ctx.strokeStyle = entity.circleStrokeStyle;
-        ctx.lineWidth = entity.circleLineWidth;
-        ctx.fillStyle = entity.circleFillStyle;
+        ctx.strokeStyle = strokeStyle;
+        ctx.lineWidth = lineWidth;
+        ctx.fillStyle = fillStyle;
 
         for(var shape of this.shapes) {
             var firstPoint = true;
@@ -1570,6 +1570,18 @@ class Picture {
             if(shape.fill) ctx.fill();
         }
 
+    }
+    renderEntity(entity, canvas, camera, addx, addy) {
+        var x0 = entity.pos.x + addx;
+        var y0 = entity.pos.y + addy;
+        var rot = entity.rot;
+        var radius = entity.radius * this.radiusmul;
+
+        this.render(canvas, x0, y0, rot, radius, {
+            strokeStyle: entity.circleStrokeStyle,
+            lineWidth: entity.circleLineWidth,
+            fillStyle: entity.circleFillStyle,
+        });
     }
 }
 
@@ -1721,8 +1733,11 @@ class BlockyLetterShapes extends BaseLetterShapes {
 }
 
 var ENERGY_PICTURE = new Picture([BlockyLetterShapes.getShape('E')]);
+var ENERGY_COLOR = 'rgb(80,200,200)';
 var FUEL_PICTURE = new Picture([BlockyLetterShapes.getShape('F')]);
+var FUEL_COLOR = 'rgb(180,65,0)';
 var GOLD_PICTURE = new Picture([BlockyLetterShapes.getShape('G')]);
+var GOLD_COLOR = 'rgb(255,165,50)';
 
 class Sprite extends FieldParticle {
     /* Represents a Particle which can be drawn onto a <canvas>. */
@@ -1763,7 +1778,7 @@ class Sprite extends FieldParticle {
         }
     }
     renderPicture(canvas, camera, addx, addy) {
-        this.picture.render(this, canvas, camera, addx, addy);
+        this.picture.renderEntity(this, canvas, camera, addx, addy);
     }
     renderTrail(canvas, camera, addx, addy) {
         var x0 = this.pos.x + addx;
@@ -2465,7 +2480,7 @@ class Pickup extends Entity {
 class EnergyPickup extends Pickup {
     static name = 'Energy';
 
-    circleStrokeStyle = 'rgb(80,200,200)';
+    circleStrokeStyle = ENERGY_COLOR;
     picture = ENERGY_PICTURE;
 
     handlePickedUp(other) {
@@ -2477,7 +2492,7 @@ class EnergyPickup extends Pickup {
 class FuelPickup extends Pickup {
     static name = 'Fuel';
 
-    circleStrokeStyle = 'rgb(180,65,0)';
+    circleStrokeStyle = FUEL_COLOR;
     picture = FUEL_PICTURE;
 
     handlePickedUp(other) {
@@ -2492,7 +2507,7 @@ class FuelPickup extends Pickup {
 class GoldPickup extends Pickup {
     static name = 'Gold';
 
-    circleStrokeStyle = 'rgb(255,165,50)';
+    circleStrokeStyle = GOLD_COLOR;
     picture = GOLD_PICTURE;
 
     handlePickedUp(other) {
@@ -2745,6 +2760,30 @@ class Game {
             if(text && !HIDE_TEXT) text.render(canvas);
         }
         if(this.camera.target) this.renderEntityStats(this.camera.target);
+    }
+    renderTextShapes(text, x0, y0, radius, cls, opts) {
+        x0 = getDefault(x0, 0);
+        y0 = getDefault(y0, 0);
+        radius = getDefault(radius, 5);
+        cls = getDefault(cls, BlockyLetterShapes);
+
+        var x = x0;
+        var y = y0;
+        var padding = 0;
+        var letter_w = radius * 2 + padding;
+
+        var shapes = cls.getShapes(text);
+        for(var shape of shapes) {
+            var picture = new Picture([shape]);
+
+            // NOTE: we add radius to x and y, because the letters' origins
+            // are in their centers, but for rendering text we want to treat
+            // their top-left corners as their origins.
+            picture.render(this.canvas, x + radius, y + radius, 
+                0, radius, opts);
+
+            x += letter_w;
+        }
     }
     renderEntityStats(entity) {
         var canvas = this.canvas;
