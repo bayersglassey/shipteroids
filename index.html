@@ -2630,11 +2630,11 @@ class Game {
         if(targetPlayer) this.camera.setTarget(targetPlayer.entity);
     }
     onKeyDown(event) {
-        this.keyDown(event.keyCode);
+        if(!event.repeat) this.keyDown(event.keyCode);
         event.preventDefault();
     }
     onKeyUp(event) {
-        this.keyUp(event.keyCode);
+        if(!event.repeat) this.keyUp(event.keyCode);
         event.preventDefault();
     }
     mapKey(key, keyCode) {
