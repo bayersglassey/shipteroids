@@ -524,7 +524,7 @@ class Point {
     }
     static units(len, array) {
         /* Bit of a wacky function. Basically just used by
-        RockLetterShapes. */
+        RockLetterPictures. */
 
         var points = [];
         for(var elem of array) {
@@ -1257,7 +1257,7 @@ class Field {
 
         var radiusmul = 1.2;
 
-        var shapes = RockLetterShapes.getShapes(text);
+        var pictures = RockLetterPictures.getPictures(text);
         var radius = DEFAULT_ROCK_RADIUS * radiusmul;
         var x0 = this.size.x / 2;
         var y0 = this.size.y / 2 - radius * 2.5;
@@ -1268,17 +1268,17 @@ class Field {
         var y = y0;
         var dx = radius * 2 + padding;
 
-        for(var shape of shapes) {
+        for(var picture of pictures) {
 
-            // Kind of a hack: turn shape.radiusmul into a multiplier for
-            // rock's radius, instead of for shape's radius.
-            var thisRadius = radius * shape.radiusmul;
-            shape.mul = 1;
+            // Kind of a hack: turn picture.radiusmul into a multiplier for
+            // rock's radius, instead of for picture's radius.
+            var thisRadius = radius * picture.radiusmul;
+            picture.mul = 1;
 
             var rock = this.addRock(Rock, thisRadius);
             rock.pos.set(x, y);
             rock.vel.set();
-            rock.picture = new Picture([shape]);
+            rock.picture = picture;
             rock.rot = 0;
             rock.rot_vel = 0;
 
@@ -1491,12 +1491,12 @@ class Shape {
     clone() {
         var points = this.points.map(p => p.clone());
         var shape = new this.constructor(points);
-        shape.stroke = this.stroke;
-        shape.fill = this.fill;
-        shape.close = this.close;
-        shape.rot = this.rot;
-        shape.radiusmul = this.radiusmul;
         shape.pos.copy(this.pos);
+        for(var key in this) {
+            if(typeof this[key] !== 'object') {
+                shape[key] = this[key];
+            }
+        }
         return shape;
     }
     flip() {
@@ -1529,6 +1529,16 @@ class Picture {
         if(props) for(var name in props) {
             if(name in this) this[name] = props[name];
         }
+    }
+    clone() {
+        var shapes = this.shapes.map(shape => shape.clone());
+        var picture = new this.constructor(shapes);
+        for(var key in this) {
+            if(typeof this[key] !== 'object') {
+                picture[key] = this[key];
+            }
+        }
+        return picture;
     }
     static newPolygon(n_points, opts, props) {
         var shape = Shape.newPolygon(n_points, opts);
@@ -1585,35 +1595,35 @@ class Picture {
     }
 }
 
-class BaseLetterShapes {
+class BaseLetterPictures {
     /* Base class for utility classes which convert strings of text into
-    Arrays of Shape. */
+    Arrays of Picture. */
 
-    // shapes_by_letter: Object mapping letters (single-character strings)
-    // to instances of Shape.
+    // pictures_by_letter: Object mapping letters (single-character strings)
+    // to instances of Picture.
     // (To be overridden by subclasses)
-    static shapes_by_letter = null;
+    static pictures_by_letter = null;
 
-    static getShape(letter) {
-        var shape = this.shapes_by_letter[letter];
-        if(!shape) {
+    static getPicture(letter) {
+        var picture = this.pictures_by_letter[letter];
+        if(!picture) {
             throw new Error(
-                'No shape defined for letter: ' + letter);
+                'No picture defined for letter: ' + letter);
         }
-        return shape;
+        return picture;
     }
-    static getShapes(text) {
-        var shapes = [];
+    static getPictures(text) {
+        var pictures = [];
         for(var letter of text) {
-            var shape = this.getShape(letter);
-            shapes.push(shape.clone());
+            var picture = this.getPicture(letter);
+            pictures.push(picture.clone());
         }
-        return shapes;
+        return pictures;
     }
 }
 
-class RockLetterShapes extends BaseLetterShapes {
-    /* Converts strings of text into Arrays of Shape for use as
+class RockLetterPictures extends BaseLetterPictures {
+    /* Converts strings of text into Arrays of Picture for use as
     Rock.picture */
 
     // I dare you to make sense of the following.
@@ -1621,12 +1631,12 @@ class RockLetterShapes extends BaseLetterShapes {
     // The points of the decahedron are represented by the numbers 0 through
     // 9, and we use the Point.unit and Point.units helper functions to turn
     // those numbers into points.)
-    static shapes_by_letter = {
-        S: new Shape(Point.units(10, [
+    static pictures_by_letter = {
+        S: new Picture([new Shape(Point.units(10, [
             new Point(0, -.5), 1, 2, 3, 4,
             new Point(0,  .5), 6, 7, 8, 9,
-        ])).mulxy(1, 1.3),
-        H: new Shape(Point.units(10, [
+        ])).mulxy(1, 1.3)]),
+        H: new Picture([new Shape(Point.units(10, [
             0, 1, 2,
             Point.unit(2 / 10).addxy(0,  .5),
             Point.unit(3 / 10).addxy(0,  .5), 3, 4,
@@ -1634,44 +1644,44 @@ class RockLetterShapes extends BaseLetterShapes {
             5, 6, 7,
             Point.unit(7 / 10).addxy(0, -.5),
             Point.unit(8 / 10).addxy(0, -.5), 8, 9,
-        ])),
-        I: new Shape(Point.units(10, [1, 2, 3,  6, 7, 8]), {radiusmul: .9}),
-        P: new Shape(Point.units(10, [0, 1, 2, 3, 4,  7, 8,
-            Point.unit(0 / 10).addxy(-.6, .2)])),
-        t: new Shape(Point.units(10, [
+        ]))]),
+        I: new Picture([new Shape(Point.units(10, [1, 2, 3,  6, 7, 8]), {radiusmul: .9})]),
+        P: new Picture([new Shape(Point.units(10, [0, 1, 2, 3, 4,  7, 8,
+            Point.unit(0 / 10).addxy(-.6, .2)]))]),
+        t: new Picture([new Shape(Point.units(10, [
             Point.unit(1 / 10).addxy(-.2), 2, 3,
             Point.unit(4 / 10).addxy( .2), 4, 5,
             Point.unit(5 / 10).addxy( .5), 7, 8,
             Point.unit(0 / 10).addxy(-.5), 0, 1,
-        ]), {radiusmul: 1}),
-        e: new Shape(Point.units(10, [0, 1, 2, 3, 4, 5, 6, 7, 8,
-            new Point(-.25)]), {radiusmul: .85}),
-        r: new Shape(Point.units(10, [0, 1, 2, 3, 4,  6, 7,
-            new Point(-.25), new Point(.2, -.2)]), {radiusmul: .85}),
-        o: Shape.newPolygon(10, {}, {radiusmul: 1.1}),
-        i: new Shape(Point.units(10, [
+        ]), {radiusmul: 1})]),
+        e: new Picture([new Shape(Point.units(10, [0, 1, 2, 3, 4, 5, 6, 7, 8,
+            new Point(-.25)]), {radiusmul: .85})]),
+        r: new Picture([new Shape(Point.units(10, [0, 1, 2, 3, 4,  6, 7,
+            new Point(-.25), new Point(.2, -.2)]), {radiusmul: .85})]),
+        o: new Picture([Shape.newPolygon(10, {}, {radiusmul: 1.1})]),
+        i: new Picture([new Shape(Point.units(10, [
             Point.unit(6 / 10).addxy(0, -.75), 6, 7, 8, 9,
             Point.unit(9 / 10).addxy(0, -.75),
             new Point(0, -.25), 2, 3,
             new Point(0, -.25),
-        ]), {radiusmul: .85}).mulxy(.9, 1.2),
-        d: new Shape(Point.units(10, [
+        ]), {radiusmul: .85}).mulxy(.9, 1.2)]),
+        d: new Picture([new Shape(Point.units(10, [
             2, 3,
             Point.unit(3 / 10).addxy(0, .75), 5, 6, 7, 8,
-        ]), {radiusmul: 1}),
-        s: new Shape(Point.units(10, [
+        ]), {radiusmul: 1})]),
+        s: new Picture([new Shape(Point.units(10, [
             new Point( .25, -.25), 1, 2, 3, 4,
             new Point(-.25,  .25), 6, 7, 8, 9,
-        ])).mulxy(.9, .8),
+        ])).mulxy(.9, .8)]),
     };
 }
 
-class BlockyLetterShapes extends BaseLetterShapes {
+class BlockyLetterPictures extends BaseLetterPictures {
     /* Converts strings of text into Arrays of Shape used in the game
     UI, e.g. displaying player's energy, fuel, and gold. */
 
-    static shapes_by_letter = {
-        E: new Shape([
+    static pictures_by_letter = {
+        E: new Picture([new Shape([
             // Top
             new Point(-1 , -1 ),
             new Point( 1 , -1 ),
@@ -1689,8 +1699,8 @@ class BlockyLetterShapes extends BaseLetterShapes {
             new Point( 1 ,  .7),
             new Point( 1 ,  1 ),
             new Point(-1 ,  1 ),
-        ]),
-        F: new Shape([
+        ])]),
+        F: new Picture([new Shape([
             // Top
             new Point(-1 , -1 ),
             new Point( 1 , -1 ),
@@ -1706,8 +1716,8 @@ class BlockyLetterShapes extends BaseLetterShapes {
             // Bottom
             new Point(-.5,  1 ),
             new Point(-1 ,  1 ),
-        ]),
-        G: new Shape([
+        ])]),
+        G: new Picture([new Shape([
             // Top
             new Point( 1 , -.7),
             new Point( .5, -1 ),
@@ -1728,15 +1738,15 @@ class BlockyLetterShapes extends BaseLetterShapes {
             new Point( .5,  .7),
             new Point(-.5,  .7),
             new Point(-.5, -.7),
-        ]),
+        ])]),
     }
 }
 
-var ENERGY_PICTURE = new Picture([BlockyLetterShapes.getShape('E')]);
+var ENERGY_PICTURE = BlockyLetterPictures.getPicture('E');
 var ENERGY_COLOR = 'rgb(80,200,200)';
-var FUEL_PICTURE = new Picture([BlockyLetterShapes.getShape('F')]);
+var FUEL_PICTURE = BlockyLetterPictures.getPicture('F');
 var FUEL_COLOR = 'rgb(180,65,0)';
-var GOLD_PICTURE = new Picture([BlockyLetterShapes.getShape('G')]);
+var GOLD_PICTURE = BlockyLetterPictures.getPicture('G');
 var GOLD_COLOR = 'rgb(255,165,50)';
 
 class Sprite extends FieldParticle {
@@ -2761,20 +2771,19 @@ class Game {
         }
         if(this.camera.target) this.renderEntityStats(this.camera.target);
     }
-    renderTextShapes(text, x0, y0, radius, cls, opts) {
+    renderTextPictures(text, x0, y0, radius, cls, opts) {
         x0 = getDefault(x0, 0);
         y0 = getDefault(y0, 0);
         radius = getDefault(radius, 5);
-        cls = getDefault(cls, BlockyLetterShapes);
+        cls = getDefault(cls, BlockyLetterPictures);
 
         var x = x0;
         var y = y0;
         var padding = 0;
         var letter_w = radius * 2 + padding;
 
-        var shapes = cls.getShapes(text);
-        for(var shape of shapes) {
-            var picture = new Picture([shape]);
+        var pictures = cls.getPictures(text);
+        for(var picture of pictures) {
 
             // NOTE: we add radius to x and y, because the letters' origins
             // are in their centers, but for rendering text we want to treat
