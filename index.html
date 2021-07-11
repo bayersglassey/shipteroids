@@ -2180,10 +2180,21 @@ class Entity extends Sprite {
         other.vel.x -= mx * r0 * velmul;
         other.vel.y -= my * r0 * velmul;
 
-        /* Update rot_vel */
-        var rot_velmul = .15;
-        this.rot_vel  += other.rot_vel * r1 * rot_velmul;
-        other.rot_vel += this.rot_vel  * r0 * rot_velmul;
+        if(
+            /* We are both instances of Ship or Rock */
+            (this instanceof Ship || this instanceof Rock) &&
+            (other instanceof Ship || other instanceof Rock) &&
+
+            /* We are not BOTH rocks
+            (because then we'll just cause each other to spin more
+            and more... because rocks always have rotmul = 1) */
+            !(this instanceof Rock && other instanceof Rock)
+        ) {
+            /* Update rot_vel */
+            var rot_velmul = .15;
+            this.rot_vel  += other.rot_vel * r1 * rot_velmul;
+            other.rot_vel += this.rot_vel  * r0 * rot_velmul;
+        }
     }
     canWarp() {
         // May be overridden by subclasses
@@ -2298,8 +2309,8 @@ class Pickup extends Entity {
         super(field);
 
         var r = Random.randInt(3);
-        this.radius = (4 + 1.5 * r) * RADIUSMUL;
-        this.pickupAmount = r * 10;
+        this.radius = (4 + r * 1.25) * RADIUSMUL;
+        this.pickupAmount = 5 + r * 5;
     }
     handleCollision(other) {
         if(other instanceof Ship) {
@@ -3238,6 +3249,20 @@ class RamShip extends Ship {
         } else {
             this.shotClass.extra1 = ReverseFlameShot;
             if(this.keys.y.wasDown) this.fire('extra1');
+        }
+    }
+    stepCPUKey(key) {
+        if(key.name === 'y') {
+            if(Math.random() < .05) key.down();
+            if(Math.random() < .001) key.up();
+        } else if(key.name === 'u') {
+            if(Math.random() < .05) key.down();
+            if(Math.random() < .001) key.up();
+        } else if(key.name === 'l' || key.name === 'r' || key.name === 'd') {
+            if(Math.random() < .05) key.down();
+            if(Math.random() < .05) key.up();
+        } else {
+            super.stepCPUKey(key);
         }
     }
     getRamPercent() {
@@ -4186,6 +4211,14 @@ class SwarmShip extends HasTurretsShip {
             }
         }
     }
+    stepCPUKey(key) {
+        if(key.name === 'y') {
+            if(Math.random() < .05) key.down();
+            if(Math.random() < .01) key.up();
+        } else {
+            super.stepCPUKey(key);
+        }
+    }
 }
 
 class Shot extends Entity {
@@ -5047,9 +5080,17 @@ var defaultMap = new function() {
         // A place full of torches and rams. Presumably red team's home base.
         fire0: defnode('Fire',
             mktemplate({
-                height: new MinMax(2),
-                rocks_per: new MinMax(30),
-                rock_radius: new MinMax(.5, 1.5),
+                height: new MinMax(3),
+                rocks_per: new MinMax(.5),
+                rock_radius: new MinMax(.15, .75),
+                ships_per: new MinMax(2),
+                ships: mkships({red: {ram: 1, torch: .25}}),
+            }), {fire1: 2}),
+        fire1: defnode('Fire',
+            mktemplate({
+                height: new MinMax(3),
+                rocks_per: new MinMax(10,30),
+                rock_radius: new MinMax(.15, .75),
                 ships_per: new MinMax(2),
                 ships: mkships({red: {torch: 1}}),
             })),
