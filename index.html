@@ -63,6 +63,8 @@ body {
 *
 * TODO:
 *
+* Effect while you're warping. (Expanding circles?..)
+*
 * MapMenu: when you're partway across an edge, your position should be shown
 * accordingly.
 * Also, your destination (node1) needs to be highlighted, and it needs to
@@ -155,6 +157,7 @@ var DEFAULT_SHIPS_PER    = 1 /  500000;
 var DEFAULT_STAR_SPEED = 3;
 var DEFAULT_ENERGY_CHANCE = .05;
 var DEFAULT_FUEL_CHANCE = .1;
+var DEFAULT_GOLD_CHANCE = .2;
 
 // keyCode values
 var KEY_U = 38;
@@ -820,6 +823,7 @@ class FieldTemplate {
 
     energy_chance = DEFAULT_ENERGY_CHANCE;
     fuel_chance = DEFAULT_FUEL_CHANCE;
+    gold_chance = DEFAULT_GOLD_CHANCE;
 
     ships = new WeightedArray();
 
@@ -1569,6 +1573,67 @@ class Picture {
     }
 }
 
+var ENERGY_PICTURE = new Picture([new Shape([
+    // Top
+    new Point(-1 , -1 ),
+    new Point( 1 , -1 ),
+    new Point( 1 , -.7),
+    new Point(-.5, -.7),
+
+    // Middle
+    new Point(-.5, -.2),
+    new Point( .5, -.2),
+    new Point( .5,  .2),
+    new Point(-.5,  .2),
+
+    // Bottom
+    new Point(-.5,  .7),
+    new Point( 1 ,  .7),
+    new Point( 1 ,  1 ),
+    new Point(-1 ,  1 ),
+])]);
+
+var FUEL_PICTURE = new Picture([new Shape([
+    // Top
+    new Point(-1 , -1 ),
+    new Point( 1 , -1 ),
+    new Point( 1 , -.7),
+    new Point(-.5, -.7),
+
+    // Middle
+    new Point(-.5, -.2),
+    new Point( .5, -.2),
+    new Point( .5,  .2),
+    new Point(-.5,  .2),
+
+    // Bottom
+    new Point(-.5,  1 ),
+    new Point(-1 ,  1 ),
+])]);
+
+var GOLD_PICTURE = new Picture([new Shape([
+    // Top
+    new Point( 1 , -.7),
+    new Point( .5, -1 ),
+    new Point(-.5, -1 ),
+    new Point(-1 , -.7),
+
+    // Bottom
+    new Point(-1 ,  .7),
+    new Point(-.5,  1 ),
+    new Point( .5,  1 ),
+    new Point( 1 ,  .7),
+
+    // Middle
+    new Point( 1 , -.2),
+    new Point( 0 , -.2),
+    new Point( 0 ,  .2),
+    new Point( .5,  .2),
+    new Point( .5,  .7),
+    new Point(-.5,  .7),
+    new Point(-.5, -.7),
+])]);
+
 class LetterShapes {
 
     // I dare you to make sense of the following.
@@ -1863,8 +1928,12 @@ class Entity extends Sprite {
         this.hp -= hp * DAMAGEMUL;
         if(this.hp < 0) this.hp = 0;
         if(!this.hp) {
-            this.die();
+            this.dieFromDamage();
         }
+    }
+    dieFromDamage() {
+        // Subclasses may want to override this
+        this.die();
     }
     die() {
         this.dead = true;
@@ -1983,17 +2052,24 @@ class Entity extends Sprite {
             this.thrustEffectCooldown += this.thrustEffectEvery;
         }
     }
-    addThrustEffects(speed, rot) {
-        for(var i = 0; i < this.thrustEffects; i++) {
-            var effect = this.field.addEffect(this.thrustEffectClass);
+    addThrustEffects(speed, rot, opts) {
+        opts = opts || EMPTY;
+        var cls = getDefault(opts.cls, this.thrustEffectClass);
+        var n_effects = getDefault(opts.n_effects, this.thrustEffects);
+        var velmul = getDefault(opts.velmul, this.thrustEffectVelMul);
+        var speedmul = getDefault(opts.speedmul, this.thrustEffectSpeedMul);
+        var posrot = getDefault(opts.posrot, this.thrustEffectPosRot);
 
-            var posrot = getRotVariance(i, this.thrustEffects)
-                * this.thrustEffectPosRot;
+        for(var i = 0; i < n_effects; i++) {
+            var effect = this.field.addEffect(cls);
 
-            effect.pos.copy(this.pos).addSpeed(this.radius, rot + posrot);
+            var addrot = getRotVariance(i, n_effects) * posrot;
+            effect.pos.copy(this.pos).addSpeed(this.radius, rot + addrot);
+
             effect.vel.copy(this.vel)
-                .mul(this.thrustEffectVelMul)
-                .addSpeed(speed * this.thrustEffectSpeedMul, rot);
+                .mul(velmul)
+                .addSpeed(speed * speedmul, rot);
+
             effect.rot = rot;
         }
     }
@@ -2353,25 +2429,7 @@ class EnergyPickup extends Pickup {
     static name = 'Energy';
 
     circleStrokeStyle = 'rgb(80,200,200)';
-    picture = new Picture([new Shape([
-        // Top
-        new Point(-1 , -1 ),
-        new Point( 1 , -1 ),
-        new Point( 1 , -.7),
-        new Point(-.5, -.7),
-
-        // Middle
-        new Point(-.5, -.2),
-        new Point( .5, -.2),
-        new Point( .5,  .2),
-        new Point(-.5,  .2),
-
-        // Bottom
-        new Point(-.5,  .7),
-        new Point( 1 ,  .7),
-        new Point( 1 ,  1 ),
-        new Point(-1 ,  1 ),
-    ])]);
+    picture = ENERGY_PICTURE;
 
     handlePickedUp(other) {
         other.heal(this.pickupAmount);
@@ -2383,28 +2441,27 @@ class FuelPickup extends Pickup {
     static name = 'Fuel';
 
     circleStrokeStyle = 'rgb(180,65,0)';
-    picture = new Picture([new Shape([
-        // Top
-        new Point(-1 , -1 ),
-        new Point( 1 , -1 ),
-        new Point( 1 , -.7),
-        new Point(-.5, -.7),
-
-        // Middle
-        new Point(-.5, -.2),
-        new Point( .5, -.2),
-        new Point( .5,  .2),
-        new Point(-.5,  .2),
-
-        // Bottom
-        new Point(-.5,  1 ),
-        new Point(-1 ,  1 ),
-    ])]);
+    picture = FUEL_PICTURE;
 
     handlePickedUp(other) {
         var player = other.getPlayer();
         if(player) {
             player.addFuel(this.pickupAmount);
+        }
+        super.handlePickedUp(other);
+    }
+}
+
+class GoldPickup extends Pickup {
+    static name = 'Gold';
+
+    circleStrokeStyle = 'rgb(255,165,50)';
+    picture = GOLD_PICTURE;
+
+    handlePickedUp(other) {
+        var player = other.getPlayer();
+        if(player) {
+            player.addGold(this.pickupAmount);
         }
         super.handlePickedUp(other);
     }
@@ -2422,6 +2479,8 @@ class Player {
     maxfuel = DEFAULT_MAXFUEL;
     fuel = DEFAULT_MAXFUEL / 2;
 
+    gold = 0;
+
     shipClasses = DEBUG? SHIP_CLASSES.getValues():
         [FighterShip, ScoutShip, AssaultShip];
 
@@ -2438,6 +2497,13 @@ class Player {
     useFuel(fuel) {
         this.fuel -= fuel;
         if(this.fuel < 0) this.fuel = 0;
+    }
+    addGold(gold) {
+        this.gold += gold;
+    }
+    useGold(gold) {
+        this.gold -= gold;
+        if(this.gold < 0) this.gold = 0;
     }
     canWarp() {
          return this.fuel >= WARP_FUEL;
@@ -2653,7 +2719,7 @@ class Game {
         var lineHeight = 20;
 
         var x = canvas.width / 2;
-        var y = canvas.height - lineHeight * 2;
+        var y = canvas.height - lineHeight * 3;
 
         var text = 'E: ' + parseInt(entity.hp) + ' / ' + entity.maxhp;
         if(entity.rock) {
@@ -2665,6 +2731,10 @@ class Game {
         var player = entity.getPlayer();
         if(player) {
             var text = 'F: ' + parseInt(player.fuel) + ' / ' + player.maxfuel;
+            ctx.fillText(text, x, y);
+            y += lineHeight;
+
+            var text = 'G: ' + parseInt(player.gold);
             ctx.fillText(text, x, y);
             y += lineHeight;
         }
@@ -3063,6 +3133,19 @@ class Ship extends Entity {
 
     static name = 'Ship';
 
+    canEmitGold() {
+        // Can be overridden by subclasses
+        return true;
+    }
+    dieFromDamage() {
+        if(
+            this.canEmitGold() &&
+            Math.random() < this.field.template.gold_chance
+        ) {
+            this.emitPickup(GoldPickup);
+        }
+        super.dieFromDamage();
+    }
     die() {
         this.emitEffects(SmokeEffect, 4, {
             speed_min: 3,
@@ -3204,7 +3287,7 @@ class RamShip extends Ship {
     minRamSpeed = 25;
     maxRamSpeed = 50;
 
-    static maxhp = 200;
+    static maxhp = 100;
 
     shotClass = {
         x: ShortDoubleShot,
@@ -3499,6 +3582,13 @@ class BaseTurretShip extends Ship {
     remove() {
         if(this.flagship) this.flagship.removeTurret(this);
         super.remove();
+    }
+    canEmitGold() {
+        return false;
+    }
+    getPlayer() {
+        if(this.flagship) return this.flagship.getPlayer();
+        return super.getPlayer();
     }
 }
 
@@ -4102,6 +4192,12 @@ class CrabShip extends Ship {
     fire(keyname) {
         if(keyname === 'y') {
             this.thrust(this.chomp_thrust, this.rot);
+            this.addThrustEffects(-2, this.rot, {
+                cls: FlameSmokeEffect,
+                n_effects: 3,
+                velmul: 0,
+                posrot: Math.PI / 2,
+            });
 
             var shotprops = this.shotprops[keyname];
             shotprops.cooldown += this.chomp_cooldown;
@@ -4840,7 +4936,7 @@ class Rock extends Entity {
         if(this.mole) this.mole.exitRock();
         super.remove();
     }
-    die() {
+    dieFromDamage() {
         var min_radius = 9 * RADIUSMUL;
         if(this.radius >= min_radius) {
             var velmul = .75;
@@ -4871,7 +4967,7 @@ class Rock extends Entity {
             this.emitPickup(FuelPickup);
         }
 
-        super.die();
+        super.dieFromDamage();
     }
 }
 
@@ -4978,6 +5074,7 @@ var defaultMap = new function() {
 
         if(props.energy_chance) props.energy_chance *= DEFAULT_ENERGY_CHANCE;
         if(props.fuel_chance) props.fuel_chance *= DEFAULT_FUEL_CHANCE;
+        if(props.gold_chance) props.gold_chance *= DEFAULT_GOLD_CHANCE;
 
         return new FieldTemplate(props);
     }
@@ -5047,6 +5144,7 @@ var defaultMap = new function() {
                 rocksText: 'SHIPteroids',
                 energy_chance: 0,
                 fuel_chance: 0,
+                gold_chance: 0,
                 text: new Text('Welcome to Shipteroids!', [
                     'Try out your new ship. This area is safe.',
                     '',
