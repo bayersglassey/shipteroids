@@ -523,7 +523,9 @@ class Point {
         return new this(1).rotate(Math.PI * 2 * rotmul);
     }
     static units(len, array) {
-        /* Bit of a whacky function. Basically just used by LetterShapes. */
+        /* Bit of a wacky function. Basically just used by
+        RockLetterShapes. */
+
         var points = [];
         for(var elem of array) {
             if(typeof elem === 'number') {
@@ -1255,7 +1257,7 @@ class Field {
 
         var radiusmul = 1.2;
 
-        var shapes = LetterShapes.getShapes(text);
+        var shapes = RockLetterShapes.getShapes(text);
         var radius = DEFAULT_ROCK_RADIUS * radiusmul;
         var x0 = this.size.x / 2;
         var y0 = this.size.y / 2 - radius * 2.5;
@@ -1571,75 +1573,43 @@ class Picture {
     }
 }
 
-var ENERGY_PICTURE = new Picture([new Shape([
-    // Top
-    new Point(-1 , -1 ),
-    new Point( 1 , -1 ),
-    new Point( 1 , -.7),
-    new Point(-.5, -.7),
+class BaseLetterShapes {
+    /* Base class for utility classes which convert strings of text into
+    Arrays of Shape. */
 
-    // Middle
-    new Point(-.5, -.2),
-    new Point( .5, -.2),
-    new Point( .5,  .2),
-    new Point(-.5,  .2),
+    // shapes_by_letter: Object mapping letters (single-character strings)
+    // to instances of Shape.
+    // (To be overridden by subclasses)
+    static shapes_by_letter = null;
 
-    // Bottom
-    new Point(-.5,  .7),
-    new Point( 1 ,  .7),
-    new Point( 1 ,  1 ),
-    new Point(-1 ,  1 ),
-])]);
+    static getShape(letter) {
+        var shape = this.shapes_by_letter[letter];
+        if(!shape) {
+            throw new Error(
+                'No shape defined for letter: ' + letter);
+        }
+        return shape;
+    }
+    static getShapes(text) {
+        var shapes = [];
+        for(var letter of text) {
+            var shape = this.getShape(letter);
+            shapes.push(shape.clone());
+        }
+        return shapes;
+    }
+}
 
-var FUEL_PICTURE = new Picture([new Shape([
-    // Top
-    new Point(-1 , -1 ),
-    new Point( 1 , -1 ),
-    new Point( 1 , -.7),
-    new Point(-.5, -.7),
-
-    // Middle
-    new Point(-.5, -.2),
-    new Point( .5, -.2),
-    new Point( .5,  .2),
-    new Point(-.5,  .2),
-
-    // Bottom
-    new Point(-.5,  1 ),
-    new Point(-1 ,  1 ),
-])]);
-
-var GOLD_PICTURE = new Picture([new Shape([
-    // Top
-    new Point( 1 , -.7),
-    new Point( .5, -1 ),
-    new Point(-.5, -1 ),
-    new Point(-1 , -.7),
-
-    // Bottom
-    new Point(-1 ,  .7),
-    new Point(-.5,  1 ),
-    new Point( .5,  1 ),
-    new Point( 1 ,  .7),
-
-    // Middle
-    new Point( 1 , -.2),
-    new Point( 0 , -.2),
-    new Point( 0 ,  .2),
-    new Point( .5,  .2),
-    new Point( .5,  .7),
-    new Point(-.5,  .7),
-    new Point(-.5, -.7),
-])]);
-
-class LetterShapes {
+class RockLetterShapes extends BaseLetterShapes {
+    /* Converts strings of text into Arrays of Shape for use as
+    Rock.picture */
 
     // I dare you to make sense of the following.
     // (Hint: we're basically chipping each letter out of a decahedron.
     // The points of the decahedron are represented by the numbers 0 through
     // 9, and we use the Point.unit and Point.units helper functions to turn
     // those numbers into points.)
-    static SHAPES_BY_LETTER = {
+    static shapes_by_letter = {
         S: new Shape(Point.units(10, [
             new Point(0, -.5), 1, 2, 3, 4,
             new Point(0,  .5), 6, 7, 8, 9,
@@ -1682,20 +1652,77 @@ class LetterShapes {
             new Point(-.25,  .25), 6, 7, 8, 9,
         ])).mulxy(.9, .8),
     };
+}
 
-    static getShapes(text) {
-        var shapes = [];
-        for(var letter of text) {
-            var shape = this.SHAPES_BY_LETTER[letter];
-            if(!shape) {
-                throw new Error(
-                    'No shape defined for letter: ' + letter);
-            }
-            shapes.push(shape.clone());
-        }
-        return shapes;
+class BlockyLetterShapes extends BaseLetterShapes {
+    /* Converts strings of text into Arrays of Shape used in the game
+    UI, e.g. displaying player's energy, fuel, and gold. */
+
+    static shapes_by_letter = {
+        E: new Shape([
+            // Top
+            new Point(-1 , -1 ),
+            new Point( 1 , -1 ),
+            new Point( 1 , -.7),
+            new Point(-.5, -.7),
+
+            // Middle
+            new Point(-.5, -.2),
+            new Point( .5, -.2),
+            new Point( .5,  .2),
+            new Point(-.5,  .2),
+
+            // Bottom
+            new Point(-.5,  .7),
+            new Point( 1 ,  .7),
+            new Point( 1 ,  1 ),
+            new Point(-1 ,  1 ),
+        ]),
+        F: new Shape([
+            // Top
+            new Point(-1 , -1 ),
+            new Point( 1 , -1 ),
+            new Point( 1 , -.7),
+            new Point(-.5, -.7),
+
+            // Middle
+            new Point(-.5, -.2),
+            new Point( .5, -.2),
+            new Point( .5,  .2),
+            new Point(-.5,  .2),
+
+            // Bottom
+            new Point(-.5,  1 ),
+            new Point(-1 ,  1 ),
+        ]),
+        G: new Shape([
+            // Top
+            new Point( 1 , -.7),
+            new Point( .5, -1 ),
+            new Point(-.5, -1 ),
+            new Point(-1 , -.7),
+
+            // Bottom
+            new Point(-1 ,  .7),
+            new Point(-.5,  1 ),
+            new Point( .5,  1 ),
+            new Point( 1 ,  .7),
+
+            // Middle
+            new Point( 1 , -.2),
+            new Point( 0 , -.2),
+            new Point( 0 ,  .2),
+            new Point( .5,  .2),
+            new Point( .5,  .7),
+            new Point(-.5,  .7),
+            new Point(-.5, -.7),
+        ]),
     }
 }
+
+var ENERGY_PICTURE = new Picture([BlockyLetterShapes.getShape('E')]);
+var FUEL_PICTURE = new Picture([BlockyLetterShapes.getShape('F')]);
+var GOLD_PICTURE = new Picture([BlockyLetterShapes.getShape('G')]);
 
 class Sprite extends FieldParticle {
     /* Represents a Particle which can be drawn onto a <canvas>. */
@@ -4681,7 +4708,7 @@ class BlasterShot extends Shot {
 class MissileShot extends Shot {
     radius = 6 * RADIUSMUL;
     static initialSpeed = 10;
-    static initialVelMul = .2;
+    static initialVelMul = .6;
     velmul = .9;
 
     thrustSpeed = 3;
