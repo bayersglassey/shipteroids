@@ -4453,6 +4453,39 @@ class SwarmShip extends HasTurretsShip {
     }
 }
 
+class BoreShip extends Ship {
+    static name = 'Bore';
+
+    radius = 7 * RADIUSMUL;
+    thrustSpeed = 1.2;
+    reverseSpeed = .9;
+    velmul = .98;
+    rotspeed = Math.PI / 25;
+    rotmul = .45;
+
+    static maxhp = 100;
+
+    shotClass = {
+        x: SingleShot,
+        y: BoreShot,
+    };
+
+    picture = new Picture([
+        new Shape([
+            new Point(-1  , -.75),
+            new Point( 1  , -.75),
+            new Point( 1  ,  .75),
+            new Point(-1  ,  .75),
+        ], {stroke: false}),
+        new Shape([
+            new Point(-1  , -.75),
+            new Point( 1  , -.75),
+            new Point( 1  ,  .75),
+            new Point(-1  ,  .75),
+        ], {fill: false, close: false}),
+    ]);
+}
+
 class Shot extends Entity {
     static name = 'Shot';
 
@@ -5016,6 +5049,39 @@ class RopeShot extends Shot {
     }
 }
 
+class BoreShot extends Shot {
+    radius = 6 * RADIUSMUL;
+    static initialSpeed = 14;
+    static initialVelMul = .9;
+    velmul = .95;
+
+    hitVelMul = .5;
+    hitDamage = 15;
+
+    maxAge = 20;
+    static cooldown = 50;
+
+    picture = Picture.newPolygon(3);
+
+    hit(other) {
+        if(other instanceof Rock) {
+            this.emitPickup(GoldPickup);
+            other.dieFromDamage();
+            this.die();
+        } else {
+            super.hit(other);
+        }
+    }
+    die() {
+        this.emitEffects(SmokeEffect, 3, {
+            speed_min: 3,
+            speed_max: 6,
+            velmul: .65,
+        });
+        super.die();
+    }
+}
+
 class Rock extends Entity {
     static name = 'Rock';
 
@@ -5152,6 +5218,7 @@ var SHIP_CLASSES = new OrderedDict()
     .set('miner', MinerShip)
     .set('engineer', EngineerShip)
     .set('troop', TroopShip)
+    .set('bore', BoreShip)
 ;
 
 
