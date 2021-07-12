@@ -24,6 +24,9 @@ body {
 </style>
 </head>
 <body>
+<div class="controls">
+    <h2>&#x25BC; SCROLL DOWN TO SEE CONTROLS &#x25BC;</h2>
+</div>
 <div class="canvas-container">
     <canvas id="canvas" class="canvas" width=700 height=700 tabindex=-1></canvas>
 </div>
@@ -2917,13 +2920,13 @@ class Game {
 
         var game = this;
         function renderText(text, strokeStyle) {
-            var bold = strokeStyle === undefined;
+            var is_colored = strokeStyle !== undefined;
             strokeStyle = getDefault(strokeStyle, 'rgb(255,255,255)');
             var render_opts = {
-                lineWidth: 1,
+                lineWidth: 2,
                 strokeStyle: strokeStyle,
-                fillStyle: bold? 'rgb(255,255,255)':
-                    'rgba(255,255,255,.25)',
+                fillStyle: is_colored? 'rgba(255,255,255,.25)':
+                    'rgb(255,255,255)',
             };
             game.renderTextPictures(text, writer, x, y,
                 letterWidth, letterHeight, padWidth, padHeight, render_opts);
@@ -5466,10 +5469,6 @@ var defaultMap = new function() {
         if(props.rock_radius) props.rock_radius.mul(DEFAULT_ROCK_RADIUS * RADIUSMUL);
         if(props.star_speed) props.star_speed.mul(DEFAULT_STAR_SPEED);
 
-        if(props.energy_chance) props.energy_chance *= DEFAULT_ENERGY_CHANCE;
-        if(props.fuel_chance) props.fuel_chance *= DEFAULT_FUEL_CHANCE;
-        if(props.gold_chance) props.gold_chance *= DEFAULT_GOLD_CHANCE;
-
         return new FieldTemplate(props);
     }
 
@@ -5532,20 +5531,106 @@ var defaultMap = new function() {
     */
 
     var nodes = mknodes({
-        intro: defnode('Introduction',
+
+        // INTRODUCTION
+        // A series of fields, comprising the title screen and tutorial.
+        intro0: defnode('Introduction',
             mktemplate({
                 rocks_per: new MinMax(0),
                 rocksText: 'SHIPteroids',
                 energy_chance: 0,
                 fuel_chance: 0,
-                gold_chance: 0,
-                text: new Text('Welcome to Shipteroids!', [
-                    'Try out your new ship. This area is safe.',
-                    '',
-                    'Press W to warp to next area.',
-                    'While warping, you take ' + WARP_COLLISION_DAMAGE
-                        + ' damage if you hit anything,',
-                    'so be careful!',
+                text: new Text('Welcome to space', [
+                    'Try out your new ship.',
+                    'Press W to warp to the next area.',
+                    'Try not to hit things while warping.',
+                ]),
+            }), {intro1: 1}),
+        intro1: defnode('Introduction',
+            mktemplate({
+                rocks_per: new MinMax(1),
+                energy_chance: .5,
+                fuel_chance: .5,
+                text: new Text('Energy and fuel', [
+                    'When your ship is damaged, it consumes energy.',
+                    'When you warp, you consume fuel.',
+                    'At the bottom of the screen, your energy',
+                    'and fuel are shown as "E" and "F".',
+                    'Shoot asteroids open to find more.',
+                ]),
+            }), {intro2: 1}),
+        intro2: defnode('Introduction',
+            mktemplate({
+                rocks_per: new MinMax(2),
+                ships_per: new MinMax(2),
+                ships: mkships({
+                    green: {fighter: 1},
+                }),
+                text: new Text('Friendly ships', [
+                    '...are green, like you.',
+                    'Don\'t worry, you can\'t damage each other.',
+                ]),
+            }), {intro3: 1}),
+        intro3: defnode('Introduction',
+            mktemplate({
+                rocks_per: new MinMax(.4),
+                gold_chance: 1,
+                ships_per: new MinMax(.5),
+                ships: mkships({
+                    blue: {fighter: 1},
+                }),
+                text: new Text('Hostile ship!', [
+                    'At the bottom of the screen, your gold',
+                    'is shown as "G".',
+                    'Destroy ships to find more.',
+                    'You can always warp away instead of fighting.',
+                ]),
+            }), {intro4a: 1, intro4b: 1}),
+        intro4a: defnode('Introduction',
+            mktemplate({
+                width: new MinMax(3),
+                height: new MinMax(.2),
+                rocks_per: new MinMax(3),
+                planets_per: new MinMax(0),
+                text: new Text('The map', [
+                    'Did you notice how, when warping this time,',
+                    'you were given a choice of branching paths?',
+                    'This branch took you to a very wide area.',
+                    'The other branch would have taken you to a',
+                    'very tall area.',
+                ]),
+            }), {intro5: 1}),
+        intro4b: defnode('Introduction',
+            mktemplate({
+                width: new MinMax(.2),
+                height: new MinMax(3),
+                rocks_per: new MinMax(3),
+                planets_per: new MinMax(0),
+                text: new Text('The map', [
+                    'Did you notice how, when warping this time,',
+                    'you were given a choice of branching paths?',
+                    'This branch took you to a very tall area.',
+                    'The other branch would have taken you to a',
+                    'very wide area.',
+                ]),
+            }), {intro5: 1}),
+        intro5: defnode('Introduction',
+            mktemplate({
+                rocks_per: new MinMax(3),
+                energy_chance: 0,
+                fuel_chance: .75,
+                text: new Text('Long warps', [
+                    'Some areas on the map are farther apart.',
+                    'Travelling between them takes multiple warps.',
+                    'It will take 2 warps to get to the next area,',
+                    'so stock up on fuel here.',
+                ]),
+            }), {intro6: 2}),
+        intro6: defnode('Shop',
+            mktemplate({
+                rocks_per: new MinMax(0),
+                text: new Text('Shop', [
+                    '...TODO: implement shops.',
                 ]),
             }), {basic0: 1}),
 
