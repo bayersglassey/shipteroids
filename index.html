@@ -2694,8 +2694,13 @@ class Player {
         var ship = this.game.addShip(cls);
         ship.pos.setRandomWithin(this.game.field.size);
         ship.rot = Random.randRotation();
-        if(this.shipHp !== null) ship.setHp(this.shipHp);
         this.setEntity(ship);
+        return ship;
+    }
+    reviveShip() {
+        // "Revive" the ship "killed" when you warped from previous area
+        var ship = this.createShip();
+        if(this.shipHp !== null) ship.setHp(this.shipHp);
         return ship;
     }
     step() {
@@ -2778,7 +2783,7 @@ class Game {
         this.field.cleanup();
         this._createField();
 
-        for(var player of this.players) player.createShip();
+        for(var player of this.players) player.reviveShip();
 
         if(targetPlayer) this.camera.setTarget(targetPlayer.entity);
     }
@@ -3084,10 +3089,6 @@ class ChooseShipMenu extends Menu {
     }
     updateShipClass() {
         var old_ship = this.player.entity;
-
-        // Set shipHp to null, so that player.createShip doesn't try
-        // to set new ship's hp to old ship's.
-        this.player.shipHp = null;
 
         var cls = player.shipClasses[this.ship_class_i];
         var ship = this.player.createShip(cls);
@@ -5656,14 +5657,6 @@ var defaultMap = new function() {
         // types of ship.
         basic0: defnode('Basic Training',
             mktemplate({
-                text: new Text('Watch out!', [
-                    'It\'s another ship! This one is hostile.',
-                    '',
-                    'You can warp to next area at any time with "W".',
-                    '',
-                    'Getting shot costs you energy (E); warping costs fuel (F).',
-                    'Shoot asteroids apart to find more.',
-                ]),
                 ships_per: new MinMax(.5),
                 ships: mkships({
                     blue: {fighter: 1},
@@ -5671,11 +5664,6 @@ var defaultMap = new function() {
             }), {basic1: 1}),
         basic1: defnode('Basic Training',
             mktemplate({
-                text: new Text('Teams', [
-                    'There are 4 teams of ships: green, blue, yellow, red.',
-                    'Each team is fighting all the others.',
-                    'Ships on the same team can\'t damage each other.',
-                ]),
                 ships_per: new MinMax(.5),
                 ships: mkships({
                     blue: {fighter: 1},
