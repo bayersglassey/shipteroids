@@ -524,7 +524,7 @@ class Point {
     }
     static units(len, array) {
         /* Bit of a wacky function. Basically just used by
-        RockLetterPictures. */
+        rockWriter. */
 
         var points = [];
         for(var elem of array) {
@@ -1257,7 +1257,7 @@ class Field {
 
         var radiusmul = 1.2;
 
-        var pictures = RockLetterPictures.getPictures(text);
+        var pictures = rockWriter.getPictures(text);
         var radius = DEFAULT_ROCK_RADIUS * radiusmul;
         var x0 = this.size.x / 2;
         var y0 = this.size.y / 2 - radius * 2.5;
@@ -1472,6 +1472,14 @@ class Shape {
             if(name in this) this[name] = props[name];
         }
     }
+    static newRect(x0, y0, x1, y1) {
+        return new this([
+            new Point(x0, y0),
+            new Point(x1, y0),
+            new Point(x1, y1),
+            new Point(x0, y1),
+        ]);
+    }
     static newPolygon(n_points, opts, props) {
         opts = opts || EMPTY;
         var rotVariance = getDefault(opts.rotVariance, 0);
@@ -1547,7 +1555,7 @@ class Picture {
     render(canvas, x0, y0, rot, radius, opts) {
         opts = opts || EMPTY;
         var strokeStyle = getDefault(opts.strokeStyle, 'rgb(255,255,255)');
-        var lineWidth = getDefault(opts.lineWidth, 2);
+        var lineWidth = getDefault(opts.lineWidth, 1);
         var fillStyle = getDefault(opts.fillStyle, 'rgba(255,255,255,.25)');
 
         // Point used for calculations
@@ -1595,16 +1603,16 @@ class Picture {
     }
 }
 
-class BaseLetterPictures {
-    /* Base class for utility classes which convert strings of text into
-    Arrays of Picture. */
+class Writer {
+    /* Utility class which converts strings of text into Arrays of
+    Picture. */
 
-    // pictures_by_letter: Object mapping letters (single-character strings)
-    // to instances of Picture.
-    // (To be overridden by subclasses)
-    static pictures_by_letter = null;
-
-    static getPicture(letter) {
+    constructor(pictures_by_letter) {
+        // pictures_by_letter: Object mapping letters (single-character
+        // strings) to instances of Picture.
+        this.pictures_by_letter = pictures_by_letter;
+    }
+    getPicture(letter) {
         var picture = this.pictures_by_letter[letter];
         if(!picture) {
             throw new Error(
@@ -1612,7 +1620,7 @@ class BaseLetterPictures {
         }
         return picture;
     }
-    static getPictures(text) {
+    getPictures(text) {
         var pictures = [];
         for(var letter of text) {
             var picture = this.getPicture(letter);
@@ -1622,131 +1630,191 @@ class BaseLetterPictures {
     }
 }
 
-class RockLetterPictures extends BaseLetterPictures {
-    /* Converts strings of text into Arrays of Picture for use as
-    Rock.picture */
-
+var rockWriter = new Writer({
     // I dare you to make sense of the following.
     // (Hint: we're basically chipping each letter out of a decahedron.
     // The points of the decahedron are represented by the numbers 0 through
     // 9, and we use the Point.unit and Point.units helper functions to turn
     // those numbers into points.)
-    static pictures_by_letter = {
-        S: new Picture([new Shape(Point.units(10, [
-            new Point(0, -.5), 1, 2, 3, 4,
-            new Point(0,  .5), 6, 7, 8, 9,
-        ])).mulxy(1, 1.3)]),
-        H: new Picture([new Shape(Point.units(10, [
-            0, 1, 2,
-            Point.unit(2 / 10).addxy(0,  .5),
-            Point.unit(3 / 10).addxy(0,  .5), 3, 4,
 
-            5, 6, 7,
-            Point.unit(7 / 10).addxy(0, -.5),
-            Point.unit(8 / 10).addxy(0, -.5), 8, 9,
-        ]))]),
-        I: new Picture([new Shape(Point.units(10, [1, 2, 3,  6, 7, 8]), {radiusmul: .9})]),
-        P: new Picture([new Shape(Point.units(10, [0, 1, 2, 3, 4,  7, 8,
-            Point.unit(0 / 10).addxy(-.6, .2)]))]),
-        t: new Picture([new Shape(Point.units(10, [
-            Point.unit(1 / 10).addxy(-.2), 2, 3,
-            Point.unit(4 / 10).addxy( .2), 4, 5,
-            Point.unit(5 / 10).addxy( .5), 7, 8,
-            Point.unit(0 / 10).addxy(-.5), 0, 1,
-        ]), {radiusmul: 1})]),
-        e: new Picture([new Shape(Point.units(10, [0, 1, 2, 3, 4, 5, 6, 7, 8,
-            new Point(-.25)]), {radiusmul: .85})]),
-        r: new Picture([new Shape(Point.units(10, [0, 1, 2, 3, 4,  6, 7,
-            new Point(-.25), new Point(.2, -.2)]), {radiusmul: .85})]),
-        o: new Picture([Shape.newPolygon(10, {}, {radiusmul: 1.1})]),
-        i: new Picture([new Shape(Point.units(10, [
-            Point.unit(6 / 10).addxy(0, -.75), 6, 7, 8, 9,
-            Point.unit(9 / 10).addxy(0, -.75),
-            new Point(0, -.25), 2, 3,
-            new Point(0, -.25),
-        ]), {radiusmul: .85}).mulxy(.9, 1.2)]),
-        d: new Picture([new Shape(Point.units(10, [
-            2, 3,
-            Point.unit(3 / 10).addxy(0, .75), 5, 6, 7, 8,
-        ]), {radiusmul: 1})]),
-        s: new Picture([new Shape(Point.units(10, [
-            new Point( .25, -.25), 1, 2, 3, 4,
-            new Point(-.25,  .25), 6, 7, 8, 9,
-        ])).mulxy(.9, .8)]),
-    };
-}
+    S: new Picture([new Shape(Point.units(10, [
+        new Point(0, -.5), 1, 2, 3, 4,
+        new Point(0,  .5), 6, 7, 8, 9,
+    ])).mulxy(1, 1.3)]),
+    H: new Picture([new Shape(Point.units(10, [
+        0, 1, 2,
+        Point.unit(2 / 10).addxy(0,  .5),
+        Point.unit(3 / 10).addxy(0,  .5), 3, 4,
 
-class BlockyLetterPictures extends BaseLetterPictures {
-    /* Converts strings of text into Arrays of Shape used in the game
-    UI, e.g. displaying player's energy, fuel, and gold. */
+        5, 6, 7,
+        Point.unit(7 / 10).addxy(0, -.5),
+        Point.unit(8 / 10).addxy(0, -.5), 8, 9,
+    ]))]),
+    I: new Picture([new Shape(Point.units(10, [1, 2, 3,  6, 7, 8]), {radiusmul: .9})]),
+    P: new Picture([new Shape(Point.units(10, [0, 1, 2, 3, 4,  7, 8,
+        Point.unit(0 / 10).addxy(-.6, .2)]))]),
+    t: new Picture([new Shape(Point.units(10, [
+        Point.unit(1 / 10).addxy(-.2), 2, 3,
+        Point.unit(4 / 10).addxy( .2), 4, 5,
+        Point.unit(5 / 10).addxy( .5), 7, 8,
+        Point.unit(0 / 10).addxy(-.5), 0, 1,
+    ]), {radiusmul: 1})]),
+    e: new Picture([new Shape(Point.units(10, [0, 1, 2, 3, 4, 5, 6, 7, 8,
+        new Point(-.25)]), {radiusmul: .85})]),
+    r: new Picture([new Shape(Point.units(10, [0, 1, 2, 3, 4,  6, 7,
+        new Point(-.25), new Point(.2, -.2)]), {radiusmul: .85})]),
+    o: new Picture([Shape.newPolygon(10, {}, {radiusmul: 1.1})]),
+    i: new Picture([new Shape(Point.units(10, [
+        Point.unit(6 / 10).addxy(0, -.75), 6, 7, 8, 9,
+        Point.unit(9 / 10).addxy(0, -.75),
+        new Point(0, -.25), 2, 3,
+        new Point(0, -.25),
+    ]), {radiusmul: .85}).mulxy(.9, 1.2)]),
+    d: new Picture([new Shape(Point.units(10, [
+        2, 3,
+        Point.unit(3 / 10).addxy(0, .75), 5, 6, 7, 8,
+    ]), {radiusmul: 1})]),
+    s: new Picture([new Shape(Point.units(10, [
+        new Point( .25, -.25), 1, 2, 3, 4,
+        new Point(-.25,  .25), 6, 7, 8, 9,
+    ])).mulxy(.9, .8)]),
+});
 
-    static pictures_by_letter = {
-        E: new Picture([new Shape([
-            // Top
-            new Point(-1 , -1 ),
-            new Point( 1 , -1 ),
-            new Point( 1 , -.7),
-            new Point(-.5, -.7),
+class BlockyDigits {
+    /* Maps digits (single-character strings, e.g. '0') onto Pictures */
 
-            // Middle
-            new Point(-.5, -.2),
-            new Point( .5, -.2),
-            new Point( .5,  .2),
-            new Point(-.5,  .2),
+    constructor() {
+        /* THE "PARTS":
 
-            // Bottom
-            new Point(-.5,  .7),
-            new Point( 1 ,  .7),
-            new Point( 1 ,  1 ),
-            new Point(-1 ,  1 ),
-        ])]),
-        F: new Picture([new Shape([
-            // Top
-            new Point(-1 , -1 ),
-            new Point( 1 , -1 ),
-            new Point( 1 , -.7),
-            new Point(-.5, -.7),
+              BBBB
+            AA    CC
+            AA    CC
+              DDDD
+            EE    GG
+            EE    GG
+              FFFF
+        */
+        this.shapes_by_part = {
+            A: Shape.newRect(-1 , -1 , -.5,  0 ),
+            B: Shape.newRect(-.5, -1 ,  .5, -.7),
+            C: Shape.newRect( .5, -1 ,  1 ,  0 ),
 
-            // Middle
-            new Point(-.5, -.2),
-            new Point( .5, -.2),
-            new Point( .5,  .2),
-            new Point(-.5,  .2),
+            D: Shape.newRect(-.5, -.2,  .5,  .2),
 
-            // Bottom
-            new Point(-.5,  1 ),
-            new Point(-1 ,  1 ),
-        ])]),
-        G: new Picture([new Shape([
-            // Top
-            new Point( 1 , -.7),
-            new Point( .5, -1 ),
-            new Point(-.5, -1 ),
-            new Point(-1 , -.7),
-
-            // Bottom
-            new Point(-1 ,  .7),
-            new Point(-.5,  1 ),
-            new Point( .5,  1 ),
-            new Point( 1 ,  .7),
-
-            // Middle
-            new Point( 1 , -.2),
-            new Point( 0 , -.2),
-            new Point( 0 ,  .2),
-            new Point( .5,  .2),
-            new Point( .5,  .7),
-            new Point(-.5,  .7),
-            new Point(-.5, -.7),
-        ])]),
+            E: Shape.newRect(-1 ,  0 , -.5,  1 ),
+            F: Shape.newRect(-.5,  .7,  .5,  1 ),
+            G: Shape.newRect( .5,  0 ,  1 ,  1 ),
+        };
+        this.pictures_by_digit = {
+            0: this.makePicture('ABCEFG'),
+            1: this.makePicture('CG'),
+            2: this.makePicture('BCDEF'),
+            3: this.makePicture('BCDGF'),
+            4: this.makePicture('ACDG'),
+            5: this.makePicture('BADGF'),
+            6: this.makePicture('BADEFG'),
+            7: this.makePicture('BCG'),
+            8: this.makePicture('ABCDEFG'),
+            9: this.makePicture('BACDG'),
+        };
+    }
+    makePicture(parts) {
+        var shapes = [];
+        for(var part of parts) {
+            var shape = this.shapes_by_part[part];
+            if(!shape) throw new Error('Part not found: ' + part);
+            shapes.push(shape);
+        }
+        return new Picture(shapes);
+    }
+    getPicture(digit) {
+        var picture = this.pictures_by_digit[digit];
+        if(!picture) {
+            throw new Error(
+                'No picture defined for digit: ' + digit);
+        }
+        return picture;
     }
 }
 
-var ENERGY_PICTURE = BlockyLetterPictures.getPicture('E');
+var blockyDigits = new BlockyDigits();
+
+var blockyWriter = new Writer({
+    E: new Picture([new Shape([
+        // Top
+        new Point(-1 , -1 ),
+        new Point( 1 , -1 ),
+        new Point( 1 , -.7),
+        new Point(-.5, -.7),
+
+        // Middle
+        new Point(-.5, -.2),
+        new Point( .5, -.2),
+        new Point( .5,  .2),
+        new Point(-.5,  .2),
+
+        // Bottom
+        new Point(-.5,  .7),
+        new Point( 1 ,  .7),
+        new Point( 1 ,  1 ),
+        new Point(-1 ,  1 ),
+    ])]),
+    F: new Picture([new Shape([
+        // Top
+        new Point(-1 , -1 ),
+        new Point( 1 , -1 ),
+        new Point( 1 , -.7),
+        new Point(-.5, -.7),
+
+        // Middle
+        new Point(-.5, -.2),
+        new Point( .5, -.2),
+        new Point( .5,  .2),
+        new Point(-.5,  .2),
+
+        // Bottom
+        new Point(-.5,  1 ),
+        new Point(-1 ,  1 ),
+    ])]),
+    G: new Picture([new Shape([
+        // Top
+        new Point( 1 , -.7),
+        new Point( .5, -1 ),
+        new Point(-.5, -1 ),
+        new Point(-1 , -.7),
+
+        // Bottom
+        new Point(-1 ,  .7),
+        new Point(-.5,  1 ),
+        new Point( .5,  1 ),
+        new Point( 1 ,  .7),
+
+        // Middle
+        new Point( 1 , -.2),
+        new Point( 0 , -.2),
+        new Point( 0 ,  .2),
+        new Point( .5,  .2),
+        new Point( .5,  .7),
+        new Point(-.5,  .7),
+        new Point(-.5, -.7),
+    ])]),
+    0: blockyDigits.getPicture('0'),
+    1: blockyDigits.getPicture('1'),
+    2: blockyDigits.getPicture('2'),
+    3: blockyDigits.getPicture('3'),
+    4: blockyDigits.getPicture('4'),
+    5: blockyDigits.getPicture('5'),
+    6: blockyDigits.getPicture('6'),
+    7: blockyDigits.getPicture('7'),
+    8: blockyDigits.getPicture('8'),
+    9: blockyDigits.getPicture('9'),
+});
+
+var ENERGY_PICTURE = blockyWriter.getPicture('E');
 var ENERGY_COLOR = 'rgb(80,200,200)';
-var FUEL_PICTURE = BlockyLetterPictures.getPicture('F');
+var FUEL_PICTURE = blockyWriter.getPicture('F');
 var FUEL_COLOR = 'rgb(180,65,0)';
-var GOLD_PICTURE = BlockyLetterPictures.getPicture('G');
+var GOLD_PICTURE = blockyWriter.getPicture('G');
 var GOLD_COLOR = 'rgb(255,165,50)';
 
 class Sprite extends FieldParticle {
@@ -2771,25 +2839,25 @@ class Game {
         }
         if(this.camera.target) this.renderEntityStats(this.camera.target);
     }
-    renderTextPictures(text, x0, y0, radius, cls, opts) {
+    renderTextPictures(text, x0, y0, radius, padding, letters, render_opts) {
         x0 = getDefault(x0, 0);
         y0 = getDefault(y0, 0);
-        radius = getDefault(radius, 5);
-        cls = getDefault(cls, BlockyLetterPictures);
+        radius = getDefault(radius, 14);
+        letters = getDefault(letters, blockyWriter);
+        padding = getDefault(padding, 0);
 
         var x = x0;
         var y = y0;
-        var padding = 0;
         var letter_w = radius * 2 + padding;
 
-        var pictures = cls.getPictures(text);
+        var pictures = letters.getPictures(text);
         for(var picture of pictures) {
 
             // NOTE: we add radius to x and y, because the letters' origins
             // are in their centers, but for rendering text we want to treat
             // their top-left corners as their origins.
             picture.render(this.canvas, x + radius, y + radius, 
-                0, radius, opts);
+                0, radius, render_opts);
 
             x += letter_w;
         }
