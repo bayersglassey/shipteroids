@@ -935,8 +935,11 @@ class MapNode extends Particle {
         other.backedges.push(edge);
         return edge;
     }
-    numEdges() {
-        return this.edges.length + this.backedges.length;
+    numEdges(includeBackedges) {
+        includeBackedges = getDefault(includeBackedges, false);
+        return includeBackedges?
+            this.edges.length + this.backedges.length:
+            this.edges.length;
     }
     getEdgeIndex(edge) {
         var i = this.edges.indexOf(edge.edge);
@@ -3160,7 +3163,7 @@ class MapMenu extends Menu {
     }
     addControls(lines) {
         lines.push('');
-        lines.push('Left/right: select branch (if current path branches)');
+        lines.push('Left/right: select branch');
     }
     setNode(node, edge_i) {
         this.node = node;
@@ -5588,8 +5591,8 @@ var defaultMap = new function() {
             }), {intro4a: 1, intro4b: 1}),
         intro4a: defnode('Introduction',
             mktemplate({
-                width: new MinMax(3),
-                height: new MinMax(.2),
+                width: new MinMax(4),
+                height: new MinMax(.3),
                 rocks_per: new MinMax(3),
                 planets_per: new MinMax(0),
                 text: new Text('The map', [
@@ -5598,12 +5601,14 @@ var defaultMap = new function() {
                     'This branch took you to a very wide area.',
                     'The other branch would have taken you to a',
                     'very tall area.',
+                    '',
+                    'Also... notice how space wraps around? Weird huh.',
                 ]),
             }), {intro5: 1}),
         intro4b: defnode('Introduction',
             mktemplate({
-                width: new MinMax(.2),
-                height: new MinMax(3),
+                width: new MinMax(.3),
+                height: new MinMax(4),
                 rocks_per: new MinMax(3),
                 planets_per: new MinMax(0),
                 text: new Text('The map', [
@@ -5612,6 +5617,8 @@ var defaultMap = new function() {
                     'This branch took you to a very tall area.',
                     'The other branch would have taken you to a',
                     'very wide area.',
+                    '',
+                    'Also... notice how space wraps around? Weird huh.',
                 ]),
             }), {intro5: 1}),
         intro5: defnode('Introduction',
@@ -5693,7 +5700,7 @@ var defaultMap = new function() {
                 rock_radius: new MinMax(.15, .75),
                 ships_per: new MinMax(2),
                 ships: mkships({red: {torch: 1}}),
-            })),
+            }), {basic2: 1}),
 
         // CORRIDOR
         // A series of wide fields, with not many rocks, stars, or planets.
@@ -5769,7 +5776,7 @@ var defaultMap = new function() {
                     yellow: {scout: 1, mole: 1, engineer: 1},
                     red: {mole: .5, troop: 2},
                 }),
-            })),
+            }), {basic1: 2}),
     });
 
     var startNodeName = getParam('start_node');
