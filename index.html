@@ -142,6 +142,7 @@ var MAX_ROT_VEL = Math.PI / 5;
 var DEFAULT_ADDHP = 1 / 40;
 var DEFAULT_ADDFUEL = 1 / 80;
 var DEFAULT_MAXFUEL = 100;
+var MAXGOLD = 100;
 var WARP_COLLISION_DAMAGE = 10;
 var WARP_FUEL = 10;
 
@@ -1262,11 +1263,11 @@ class Field {
         var x0 = this.size.x / 2;
         var y0 = this.size.y / 2 - radius * 2.5;
 
-        var padding = 0;
-        var w = text.length * (radius * 2) + (text.length - 1) * padding;
+        var padWidth = 0;
+        var w = text.length * (radius * 2) + (text.length - 1) * padWidth;
         var x = x0 - w / 2;
         var y = y0;
-        var dx = radius * 2 + padding;
+        var dx = radius * 2 + padWidth;
 
         for(var picture of pictures) {
 
@@ -1552,7 +1553,7 @@ class Picture {
         var shape = Shape.newPolygon(n_points, opts);
         return new this([shape], props);
     }
-    render(canvas, x0, y0, rot, radius, opts) {
+    render(canvas, x0, y0, rot, radius_x, radius_y, opts) {
         opts = opts || EMPTY;
         var strokeStyle = getDefault(opts.strokeStyle, 'rgb(255,255,255)');
         var lineWidth = getDefault(opts.lineWidth, 1);
@@ -1574,7 +1575,8 @@ class Picture {
                     .rotate(shape.rot)
                     .add(shape.pos)
                     .rotate(rot)
-                    .mul(radius * shape.radiusmul)
+                    .mulxy(radius_x, radius_y)
+                    .mul(shape.radiusmul)
                     .addxy(x0, y0);
                 if(firstPoint) {
                     ctx.moveTo(p.x, p.y);
@@ -1595,7 +1597,7 @@ class Picture {
         var rot = entity.rot;
         var radius = entity.radius * this.radiusmul;
 
-        this.render(canvas, x0, y0, rot, radius, {
+        this.render(canvas, x0, y0, rot, radius, radius, {
             strokeStyle: entity.circleStrokeStyle,
             lineWidth: entity.circleLineWidth,
             fillStyle: entity.circleFillStyle,
@@ -1637,6 +1639,7 @@ var rockWriter = new Writer({
     // 9, and we use the Point.unit and Point.units helper functions to turn
     // those numbers into points.)
 
+    ' ': new Picture(),
     S: new Picture([new Shape(Point.units(10, [
         new Point(0, -.5), 1, 2, 3, 4,
         new Point(0,  .5), 6, 7, 8, 9,
@@ -1716,6 +1719,8 @@ class BlockyDigits {
             7: this.makePicture('BCG'),
             8: this.makePicture('ABCDEFG'),
             9: this.makePicture('BACDG'),
+            '[': this.makePicture('BAEF'),
+            ']': this.makePicture('BCGF'),
         };
     }
     makePicture(parts) {
@@ -1798,6 +1803,19 @@ var blockyWriter = new Writer({
         new Point(-.5,  .7),
         new Point(-.5, -.7),
     ])]),
+
+    ' ': new Picture(),
+    ':': new Picture([
+        Shape.newRect(-.25, -.7,  .25, -.2),
+        Shape.newRect(-.25,  .2,  .25,  .7),
+    ]),
+    '/': new Picture([new Shape([
+        new Point(-1 ,  1 ),
+        new Point(-.8,  1 ),
+        new Point( .8, -1 ),
+        new Point( 1 , -1 ),
+    ])]),
+
     0: blockyDigits.getPicture('0'),
     1: blockyDigits.getPicture('1'),
     2: blockyDigits.getPicture('2'),
@@ -2609,6 +2627,7 @@ class Player {
     maxfuel = DEFAULT_MAXFUEL;
     fuel = DEFAULT_MAXFUEL / 2;
 
+    maxgold = MAXGOLD;
     gold = 0;
 
     shipClasses = DEBUG? SHIP_CLASSES.getValues():
@@ -2630,6 +2649,7 @@ class Player {
     }
     addGold(gold) {
         this.gold += gold;
+        if(this.gold > this.maxgold) this.gold = this.maxgold;
     }
     useGold(gold) {
         this.gold -= gold;
@@ -2839,57 +2859,104 @@ class Game {
         }
         if(this.camera.target) this.renderEntityStats(this.camera.target);
     }
-    renderTextPictures(text, x0, y0, radius, padding, letters, render_opts) {
+    renderTextPictures(text, writer, x0, y0, letterWidth, letterHeight, padWidth, padHeight, render_opts) {
+        writer = getDefault(writer, blockyWriter);
         x0 = getDefault(x0, 0);
         y0 = getDefault(y0, 0);
-        radius = getDefault(radius, 14);
-        letters = getDefault(letters, blockyWriter);
-        padding = getDefault(padding, 0);
+        letterWidth = getDefault(letterWidth, 14);
+        letterHeight = getDefault(letterHeight, 12);
+        padWidth = getDefault(padWidth, 4);
+        padHeight = getDefault(padHeight, 4);
 
         var x = x0;
         var y = y0;
-        var letter_w = radius * 2 + padding;
 
-        var pictures = letters.getPictures(text);
+        // "radius" x and y are just half the width * height.
+        // Weird nomenclature, but anyway they are ultimately used as
+        // multipliers of picture's points' x and y positions.
+        var radius_x = letterWidth / 2;
+        var radius_y = letterHeight / 2;
+
+        var pictures = writer.getPictures(text);
         for(var picture of pictures) {
 
-            // NOTE: we add radius to x and y, because the letters' origins
-            // are in their centers, but for rendering text we want to treat
-            // their top-left corners as their origins.
-            picture.render(this.canvas, x + radius, y + radius, 
-                0, radius, render_opts);
+            // NOTE: we add radius_x/y (that is, half letter's width/height)
+            // to x and y, because the letters' origins are in their centers,
+            // but for rendering text we want to treat their top-left
+            // corners as their origins.
+            picture.render(this.canvas,
+                x + radius_x, y + radius_y,
+                0, radius_x, radius_y, render_opts);
 
-            x += letter_w;
+            x += letterWidth + padWidth;
         }
     }
     renderEntityStats(entity) {
         var canvas = this.canvas;
         var ctx = canvas.getContext('2d');
-        ctx.fillStyle = '#fff';
-        ctx.textAlign = 'center';
-        ctx.font = 'normal bold 24px sans-serif';
 
-        var lineHeight = 20;
+        // Arguments to this.renderTextPictures:
+        var writer = blockyWriter;
+        var letterWidth = 20;
+        var letterHeight = 24;
+        var padWidth = 4;
+        var padHeight = 4;
 
-        var x = canvas.width / 2;
-        var y = canvas.height - lineHeight * 3;
+        // Number of lines of text we plan to render (bit of a hack, this)
+        var n_lines = 3;
 
-        var text = 'E: ' + parseInt(entity.hp) + ' / ' + entity.maxhp;
-        if(entity.rock) {
-            text += ' (' + parseInt(entity.rock.hp) + ' / ' + entity.rock.maxhp + ')';
+        var x0 = padWidth * 2;
+        var y0 = canvas.height
+            - letterHeight * n_lines
+            - padHeight * (n_lines - 1)
+            - padHeight * 2;
+        var x = x0;
+        var y = y0;
+        var dx = letterWidth + padWidth;
+        var dy = letterHeight + padHeight;
+
+        var game = this;
+        function renderText(text, strokeStyle) {
+            var bold = strokeStyle === undefined;
+            strokeStyle = getDefault(strokeStyle, 'rgb(255,255,255)');
+            var render_opts = {
+                lineWidth: 1,
+                strokeStyle: strokeStyle,
+                fillStyle: bold? 'rgb(255,255,255)':
+                    'rgba(255,255,255,.25)',
+            };
+            game.renderTextPictures(text, writer, x, y,
+                letterWidth, letterHeight, padWidth, padHeight, render_opts);
+            x += dx;
         }
-        ctx.fillText(text, x, y);
-        y += lineHeight;
+        function newline() {
+            x = x0;
+            y += dy;
+        }
+        var parseAmount = amount =>
+            parseInt(amount).toString().padStart(3, ' ');
+
+        renderText('E', ENERGY_COLOR);
+        var text = ': ' + parseAmount(entity.hp)
+            + ' / ' + parseAmount(entity.maxhp);
+        if(entity.rock) {
+            var rock = entity.rock;
+            text += ' [' + parseAmount(rock.hp)
+                + ' / ' + parseAmount(rock.maxhp) + ']';
+        }
+        renderText(text);
+        newline();
 
         var player = entity.getPlayer();
         if(player) {
-            var text = 'F: ' + parseInt(player.fuel) + ' / ' + player.maxfuel;
-            ctx.fillText(text, x, y);
-            y += lineHeight;
+            renderText('F', FUEL_COLOR);
+            renderText(': ' + parseAmount(player.fuel)
+                + ' / ' + parseAmount(player.maxfuel));
+            newline();
 
-            var text = 'G: ' + parseInt(player.gold);
-            ctx.fillText(text, x, y);
-            y += lineHeight;
+            renderText('G', GOLD_COLOR);
+            renderText(': ' + parseAmount(player.gold));
+            newline();
         }
     }
     renderTitle(title, subtitles) {
@@ -4930,15 +4997,14 @@ class DoubleFlameShot extends FlameShot {
 class ReverseFlameShot extends FlameShot {
     static isReverseShot = true;
 
-    hitDamage = 3;
-    static cooldown = 1;
+    hitDamage = 2;
+    static cooldown = 2;
 }
 
 class RamFlameShot extends ReverseFlameShot {
+    /* Ram's flames when it's ramming (when isRamming() is true) */
     radius = 5 * RADIUSMUL;
     circleFillStyle = 'rgba(255,200,0,.35)';
-
-    hitDamage = 5;
 }
 
 class MineShot extends Shot {
