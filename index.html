@@ -66,12 +66,8 @@ body {
 *
 * TODO:
 *
-* MapMenu: when you're partway across an edge, your position should be shown
-* accordingly.
-* Also, your destination (node1) needs to be highlighted, and it needs to
+* MapMenu: your destination (node1) needs to be highlighted, and it needs to
 * be clear which direction you're travelling.
-*
-* Add an area teaching about edges with len > 1
 *
 * When a Field is populated, we should make sure things don't overlap,
 * otherwise everything will start immediately rocketing around the screen.
@@ -84,14 +80,6 @@ body {
 * (Is this... already done?)
 *
 * Seems like one end of RopeShot can get stuck to something and live forever...
-*
-* MapMenu should render nodes with size & colour indicating a bit of what
-* you'll find there.
-* Easiest thing would presumably be to take the relative weights of teams'
-* ships and mix their team colors together?..
-* Or something like each node is rendered as a bunch of coloured balls,
-* one for rocks, one for planets, one for each team, and the balls' sizes
-* tell you how many of that thing to expect.
 *
 * How can we add upgrades?
 * Do we add shops?
@@ -372,7 +360,7 @@ class Random {
     static randRotation() {
         return this.randNumber(Math.PI * 2);
     }
-    static randColor(min, max) {
+    static randColor(min, max, alpha) {
         if(max === undefined) {
             max = min;
             min = 0;
@@ -382,14 +370,18 @@ class Random {
         var r = this.randInt(min, max);
         var g = this.randInt(min, max);
         var b = this.randInt(min, max);
-        return Color.rgb(r, g, b);
+        return alpha === undefined? Color.rgb(r, g, b):
+            Color.rgba(r, g, b, alpha);
     }
 }
 
 class Color {
     /* Helper functions for creating CSS colours */
-    static rgb(r, g, b, a) {
+    static rgb(r, g, b) {
         return 'rgb(' + r + ',' + g + ',' + b + ')';
+    }
+    static rgba(r, g, b, a) {
+        return 'rgba(' + r + ',' + g + ',' + b + ',' + a + ')';
     }
 }
 
@@ -408,6 +400,11 @@ class Point {
     set(x, y) {
         this.x = getDefault(x, 0);
         this.y = getDefault(y, 0);
+        return this;
+    }
+    linear(other, m) {
+        this.x = linear(this.x, other.x, m);
+        this.y = linear(this.y, other.y, m);
         return this;
     }
     area() {
@@ -924,9 +921,9 @@ class MapNode extends Particle {
         var speed = Random.randNumber(250);
         var rot = Random.randRotation();
         this.pos.addSpeed(speed, rot);
-        this.radius = 12;
+        this.radius = Random.randNumber(9, 15);
 
-        this.strokeStyle = 'rgba(20,100,200,.75)';
+        this.strokeStyle = Random.randColor(80, 256, .75);
         this.fillStyle = 'rgba(255,255,255,.25)';
     }
     addEdge(other, len) {
@@ -977,7 +974,7 @@ class MapEdge {
         this.forwardEdge = new DirectedMapEdge(this, false);
         this.backEdge = new DirectedMapEdge(this, true);
 
-        this.strokeStyle = 'rgba(20,100,200,.75)';
+        this.strokeStyle = Random.randColor(0, 200, .75);
     }
 }
 
@@ -1073,6 +1070,16 @@ class MapProgress {
         this.map = map;
         this.node = getDefault(startNode, map.getStartNode());
         this.updateTemplate();
+    }
+    getPos() {
+        if(this.edge) {
+            var pos0 = this.node.pos;
+            var pos1 = this.edge.getNode1().pos;
+            var m = this.edgeDist / this.edge.getLen();
+            return pos0.clone().linear(pos1, m);
+        } else {
+            return this.node.pos;
+        }
     }
     canProceed() {
         return Boolean(this.edge);
@@ -3182,20 +3189,23 @@ class MapMenu extends Menu {
     render() {
         var canvas = this.game.canvas;
         var ctx = canvas.getContext('2d');
-        var x0 = canvas.width / 2 - this.node.pos.x;
-        var y0 = canvas.height / 2 - this.node.pos.y;
 
         this.text.render(this.game.canvas);
 
         var progress = this.game.progress;
         var map = progress.map;
+
+        var progressPos = progress.getPos();
+        var x0 = canvas.width / 2 - progressPos.x;
+        var y0 = canvas.height / 2 - progressPos.y;
+
         for(var node of map.nodes) {
             var x = x0 + node.pos.x;
             var y = y0 + node.pos.y;
             var radius = node.radius;
             var strokeStyle = node.strokeStyle;
             var fillStyle = node.fillStyle;
-            var lineWidth = 2;
+            var lineWidth = 3;
 
             if(node === this.node) {
                 strokeStyle = '#fff';
@@ -3212,7 +3222,7 @@ class MapMenu extends Menu {
                 var x2 = x0 + node2.pos.x;
                 var y2 = y0 + node2.pos.y;
                 var strokeStyle = edge.strokeStyle;
-                var lineWidth = 1;
+                var lineWidth = 2;
 
                 if(edge === this.edge.edge) {
                     strokeStyle = '#fff';
