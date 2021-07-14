@@ -116,6 +116,8 @@ var RENDER_CIRCLES = getBoolParam('render_circles');
 var RENDER_BOUNDARY = getBoolParam('render_boundary');
 var HIDE_TEXT = getBoolParam('hide_text');
 var NODAMAGE = getBoolParam('nodamage');
+var NOVIBRATE = getBoolParam('novibrate');
+var VIBRATE = !NOVIBRATE;
 
 // physics tweaking stuff
 var VELMUL = .7;
@@ -160,6 +162,33 @@ var KEY_SHIFT = 16;
 var KEY_ESCAPE = 27;
 var KEY_WARP = 87; // 'W'
 var KEY_TAB = 9;
+
+// Gamepad button indices for HTML5 Gamepad.buttons
+// (Assumes the "standard mapping",
+// see: https://w3c.github.io/gamepad/#remapping)
+var GAMEPAD_BUTTONS = {
+    12: 'u',
+    13: 'd',
+    14: 'l',
+    15: 'r',
+     0: 'u',
+     1: 'u',
+     2: 'd',
+     3: 'd',
+     5: 'x',
+     7: 'x',
+     4: 'y',
+     6: 'y',
+};
+
+// Axis threshold: value between 0 and 1, past which we
+// consider an HTML5 Gamepad axis (e.g. joystick) to be
+// "pressed".
+// That is, each value in Gamepad.axes can be between -1 and 1,
+// but we want to convert that into boolean key presses for "left",
+// "right", "up", "down".
+var GAMEPAD_AXIS_THRESHOLD = .5;
+
 
 class OrderedDictEntry {
     constructor(key, value) {
@@ -1946,12 +1975,24 @@ class Key {
     copy(other) {
         this.isDown = other.isDown;
         this.wasDown = other.wasDown;
+        return this;
+    }
+    union(other) {
+        // The state of this becomes the "union" of this and other.
+        // So think "boolean OR".
+        if(other.isDown) this.isDown = true;
+        if(other.wasDown) this.wasDown = true;
+        return this;
     }
     down() {
         this.isDown = this.wasDown = true;
     }
     up() {
         this.isDown = false;
+    }
+    set(isDown) {
+        if(isDown) this.down();
+        else this.up();
     }
     step() {
         this.wasDown = this.isDown;
@@ -2076,6 +2117,9 @@ class Entity extends Sprite {
         // being generated when this is a Rock)
         if(this.hp === 0) return;
 
+        var m = Math.min(hp / 35, 1);
+        this.vibrate(Math.max(1000 * m, 200), m, m/4);
+
         if(this instanceof Ship && NODAMAGE) return;
 
         this.hp -= hp * DAMAGEMUL;
@@ -2086,6 +2130,7 @@ class Entity extends Sprite {
     }
     dieFromDamage() {
         // Subclasses may want to override this
+        this.vibrate(1500, .2, .5);
         this.die();
     }
     die() {
@@ -2297,6 +2342,12 @@ class Entity extends Sprite {
             this.afterShot(shot);
         }
 
+        if(cls.vibrateDuration) {
+            this.vibrate(cls.vibrateDuration,
+                cls.vibrateWeakMagnitude,
+                cls.vibrateStrongMagnitude);
+        }
+
         shotprops.cooldown += cls.cooldown;
         shotprops.n_shots++;
     }
@@ -2399,6 +2450,11 @@ class Entity extends Sprite {
 
         /* Distance between this and other */
         var dist = this.pos.dist(other.pos, this.field.size);
+
+        /* Vibrate players' controllers?? */
+        var vib_m = 1 - Math.min(dist / (this.radius + other.radius), 1);
+        this.vibrate(Math.max(1000 * vib_m, 200), vib_m * .5 * r1, 0);
+        other.vibrate(Math.max(1000 * vib_m, 200), vib_m * .5 * r0, 0);
 
         /* Avoid div by zero, eh */
         if(dist < .1) {
@@ -2511,6 +2567,19 @@ class Entity extends Sprite {
         ctx.moveTo(x0, y0);
         ctx.lineTo(x1, y1);
         ctx.stroke();
+    }
+    vibrate(duration, weakMagnitude, strongMagnitude) {
+        if(!VIBRATE) return;
+        var player = this.getPlayer();
+        if(!player) return;
+        if(player.gamepad && player.gamepad.vibrationActuator) {
+            player.gamepad.vibrationActuator.playEffect("dual-rumble", {
+              startDelay: 0,
+              duration: duration,
+              weakMagnitude: weakMagnitude,
+              strongMagnitude: strongMagnitude,
+            });
+        }
     }
 }
 
@@ -2646,11 +2715,15 @@ class Player {
     shipClasses = DEBUG? SHIP_CLASSES.getValues():
         [FighterShip, ScoutShip, AssaultShip];
 
+    // gamepad: an HTML5 Gamepad instance, or null
+    gamepad = null;
+
     constructor(game) {
         this.game = game;
         this.entity = null;
         this.team = TEAMS.get('green');
         this.keys = Key.createKeys();
+        this.gamepad_keys = Key.createKeys();
     }
     addFuel(fuel) {
         this.fuel += fuel;
@@ -2708,11 +2781,45 @@ class Player {
 
         if(this.fuel < WARP_FUEL) this.addFuel(DEFAULT_ADDFUEL);
 
+        if(this.gamepad) {
+            // If a gamepad is connected for this player, update
+            // this.gamepad_keys based on gamepad's input
+            this.handleGamepadInput();
+        } else {
+            // Reset gamepad keys if no gamepad is connected
+            for(var keyname of Key.KEYNAMES) {
+                var gamepad_key = this.gamepad_keys[keyname];
+                gamepad_key.up();
+            }
+        }
+
         for(var keyname of Key.KEYNAMES) {
             var key = this.keys[keyname];
-            this.entity.keys[keyname].copy(key);
+            var gamepad_key = this.gamepad_keys[keyname];
+
+            this.entity.keys[keyname].copy(key).union(gamepad_key);
+
             key.step();
+            gamepad_key.step();
         }
+    }
+    handleGamepadInput() {
+        var gamepad = this.gamepad;
+
+        for(var button_index in GAMEPAD_BUTTONS) {
+            var keyname = GAMEPAD_BUTTONS[button_index];
+            var key = this.gamepad_keys[keyname];
+            var button = gamepad.buttons[button_index];
+            if(button.pressed) key.down();
+            else key.up();
+        }
+
+        var x_axis = gamepad.axes[0];
+        var y_axis = gamepad.axes[1];
+        this.gamepad_keys.l.set(x_axis < -GAMEPAD_AXIS_THRESHOLD);
+        this.gamepad_keys.r.set(x_axis >  GAMEPAD_AXIS_THRESHOLD);
+        this.gamepad_keys.u.set(y_axis < -GAMEPAD_AXIS_THRESHOLD);
+        this.gamepad_keys.d.set(y_axis >  GAMEPAD_AXIS_THRESHOLD);
     }
 }
 
@@ -2743,10 +2850,21 @@ class Game {
         canvas.addEventListener('keydown', this.onKeyDown.bind(this));
         canvas.addEventListener('keyup', this.onKeyUp.bind(this));
 
+        window.addEventListener('gamepadconnected',
+            this.onGamepadActivity.bind(this));
+        window.addEventListener('gamepaddisconnected',
+            this.onGamepadActivity.bind(this));
+
         this.canvas = canvas;
         this.intervalId = 0;
         this.players = [];
         this.menu = null;
+
+        // Whether to bother polling for gamepads
+        this.gamepadsConnected = false;
+
+        // HTML5 GamepadList or null
+        this.gamepads = null;
 
         /* Hashmap from keyCode values to Key instances belonging to
         Player instances in this.players */
@@ -2794,6 +2912,25 @@ class Game {
     onKeyUp(event) {
         if(!event.repeat) this.keyUp(event.keyCode);
         event.preventDefault();
+    }
+    onGamepadActivity(event) {
+        // This handler is for either of these events:
+        //   'gamepadconnected'
+        //   'gamepaddisconnected'
+        // ...why? Well you see:
+        // Apparently the Gamepad API can be a bit wonky, and fire
+        // 'gamepaddisconnected' when gamepads are connected.
+        // Also, I've found that holding onto a Gamepad object is no
+        // good -- its buttons are never updated.
+        // So we need to call navigator.getGamepads() ever frame anyway.
+        // SOOOO, instead of trying to detect when gamepads are
+        // connected/disconnected, we just listen for either event, and
+        // in either case *somebody was touching a gamepad at some point*,
+        // so we flip a flag which tells us to bother polling
+        // navigator.getGamepads() every frame.
+        // Make sense?
+        // Hahahahaha sure
+        this.gamepadsConnected = true;
     }
     mapKey(key, keyCode) {
         this.keysByCode[keyCode] = key;
@@ -2856,6 +2993,26 @@ class Game {
         return player;
     }
     step() {
+
+        // Unset player.gamepad for all players.
+        for(var player of this.players) player.gamepad = null;
+
+        // Maybe poll for gamepads, and set player.gamepad for players
+        // with a connected gamepad.
+        if(this.gamepadsConnected) {
+            var gamepads = navigator.getGamepads();
+            for(var i = 0; i < gamepads.length; i++) {
+                // HACK: we associate gamepads to players in the order
+                // gamepads are connected, i.e. the first gamepad to be
+                // connected is associated with the first player.
+                // TODO: fix this (whenever we get around to adding some
+                // kind of UI for choosing controls)
+                var player = this.players[i];
+                if(!player) continue;
+                player.gamepad = gamepads[i];
+            }
+        }
+
         for(var player of this.players) player.step();
         for(var player of this.cpus) player.step();
 
@@ -4733,6 +4890,11 @@ class Shot extends Entity {
     static initialVelMul = 1;
     static randomSpeedVariance = 0;
 
+    // Making player's gamepad rumble when they shoot
+    static vibrateDuration = 0;
+    static vibrateWeakMagnitude = 0;
+    static vibrateStrongMagnitude = 0;
+
     // How hard we move things we hit
     hitVelMul = .1;
 
@@ -4853,6 +5015,9 @@ class MiniBlasterShot extends Shot {
     maxAge = 12;
     static cooldown = 8;
 
+    static vibrateDuration = 200;
+    static vibrateStrongMagnitude = .2;
+
     picture = Picture.newPolygon(6);
 
     die() {
@@ -4888,6 +5053,10 @@ class BlasterShot extends Shot {
     maxAge = 20;
     static cooldown = 32;
 
+    static vibrateDuration = 350;
+    static vibrateWeakMagnitude = .2;
+    static vibrateStrongMagnitude = .6;
+
     picture = Picture.newPolygon(6);
 
     die() {
@@ -4919,6 +5088,10 @@ class MissileShot extends Shot {
     maxAge = 30;
     fadeWithAge = false;
     static cooldown = 24;
+
+    static vibrateDuration = 300;
+    static vibrateWeakMagnitude = .2;
+    static vibrateStrongMagnitude = .4;
 
     shouldRenderTrail = true;
     trailCamVel = 0;
@@ -5061,6 +5234,9 @@ class ChompShot extends Shot {
 
     maxAge = 5;
     static cooldown = 6;
+
+    static vibrateDuration = 200;
+    static vibrateWeakMagnitude = .35;
 
     circleStrokeStyle = 'rgba(255,150,0,.4)';
     inheritTeamColor = false;
@@ -5286,6 +5462,10 @@ class BoreShot extends Shot {
 
     maxAge = 20;
     static cooldown = 50;
+
+    static vibrateDuration = 350;
+    static vibrateWeakMagnitude = .2;
+    static vibrateStrongMagnitude = .6;
 
     picture = Picture.newPolygon(3);
 
