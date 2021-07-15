@@ -838,6 +838,7 @@ class FieldTemplate {
 
     text = null;
     rocksText = null;
+    shop = null;
 
     width = new MinMax(DEFAULT_FIELD_WIDTH);
     height = new MinMax(DEFAULT_FIELD_HEIGHT);
@@ -873,6 +874,8 @@ class FieldTemplate {
             var thisProp = this[name];
             if(thisProp instanceof MinMax) {
                 props[name] = thisProp.clone();
+            } else if(thisProp instanceof Shop) {
+                props[name] = thisProp;
             } else if(thisProp instanceof WeightedArray) {
                 props[name] = thisProp.clone();
             } else if(thisProp instanceof Text) {
@@ -911,6 +914,8 @@ class FieldTemplate {
             } else if(
                 thisProp instanceof Text ||
                 otherProp instanceof Text ||
+                thisProp instanceof Shop ||
+                otherProp instanceof Shop ||
                 typeof thisProp === 'string' ||
                 typeof otherProp === 'string'
             ) {
@@ -1170,6 +1175,7 @@ class Field {
         this.pickups = this.addEntityArray();
 
         this.template = null;
+        this.shop = null;
 
         /* Create a canvas for rendering this Field.
         This canvas is never attached to a parent element, we only
@@ -1180,6 +1186,8 @@ class Field {
     }
     populate(template) {
         this.template = template;
+
+        this.shop = template.shop;
 
         var area = this.size.area();
         var n_stars = area * template.stars_per.getRand();
@@ -2697,7 +2705,20 @@ class GoldPickup extends Pickup {
     }
 }
 
+
+class Trinket {
+    /* Something with no particular use, which players can obtain */
+
+    constructor(name, description) {
+        this.name = name;
+        this.description = description;
+    }
+}
+
 class Player {
+
+    // trinkets: Array of Trinket
+    trinkets = [];
 
     shipClass = null;
 
@@ -2706,11 +2727,15 @@ class Player {
     // save more than just hp?..
     shipHp = null;
 
+    // addmaxhp: whenever a new ship is created for us, add this much to its
+    // max hp.
+    addmaxhp = 0;
+
     maxfuel = DEFAULT_MAXFUEL;
     fuel = DEFAULT_MAXFUEL / 2;
 
     maxgold = MAXGOLD;
-    gold = 0;
+    gold = DEBUG? MAXGOLD: 0;
 
     shipClasses = DEBUG? SHIP_CLASSES.getValues():
         [FighterShip, ScoutShip, AssaultShip];
@@ -2724,6 +2749,13 @@ class Player {
         this.team = TEAMS.get('green');
         this.keys = Key.createKeys();
         this.gamepad_keys = Key.createKeys();
+    }
+    addMaxHp(hp) {
+        this.addmaxhp += hp;
+        if(this.entity) {
+            this.entity.maxhp += hp;
+            this.entity.hp += hp;
+        }
     }
     addFuel(fuel) {
         this.fuel += fuel;
@@ -2767,6 +2799,8 @@ class Player {
         var ship = this.game.addShip(cls);
         ship.pos.setRandomWithin(this.game.field.size);
         ship.rot = Random.randRotation();
+        ship.maxhp += this.addmaxhp;
+        ship.hp += this.addmaxhp;
         this.setEntity(ship);
         return ship;
     }
@@ -2904,6 +2938,8 @@ class Game {
         for(var player of this.players) player.reviveShip();
 
         if(targetPlayer) this.camera.setTarget(targetPlayer.entity);
+
+        if(this.field.shop) this.setMenu(ShopMenu);
     }
     onKeyDown(event) {
         if(!event.repeat) this.keyDown(event.keyCode);
@@ -2967,8 +3003,9 @@ class Game {
         }
     }
     setMenu(cls) {
-        this.unsetMenu();
+        var previous = this.menu;
         this.menu = new cls(this);
+        this.menu.previous = previous;
 
         // Unpress all keys so our ship doesn't fly in circles
         // or whatever while menu is open
@@ -2977,7 +3014,7 @@ class Game {
     unsetMenu() {
         if(!this.menu) return;
         this.menu.cleanup();
-        this.menu = null;
+        this.menu = this.menu.previous;
     }
     addShip(cls) {
         return this.field.addShip(cls);
@@ -3188,6 +3225,10 @@ class Game {
 class Menu {
     constructor(game) {
         this.game = game;
+
+        // previous: Menu instance or null.
+        // (The Menu to return to when this one is closed)
+        this.previous = null;
     }
     cleanup() {
     }
@@ -3196,6 +3237,116 @@ class Menu {
     keyDown(keyCode) {
     }
     keyUp(keyCode) {
+    }
+}
+
+class ShopMenu extends Menu {
+    player = null;
+    shop = null;
+
+    // item_i: index into this.shop.items, or -1 for "leave the shop"
+    item_i = -1;
+
+    // string, set by this.update()
+    title = null;
+
+    // Array of string, set by this.update()
+    subtitles = null;
+
+    constructor(game) {
+        super(game);
+
+        if(!game.players.length) {
+            // Should never happen... *shifty eyes*
+            throw new Error('No players!');
+        }
+
+        // Hack: choose first player
+        this.player = game.players[0];
+
+        this.shop = game.field.shop;
+        this.update();
+    }
+    getSelectedItem() {
+        if(!this.shop.items.length) return null;
+        if(this.item_i < 0) return null;
+        return this.shop.items[this.item_i];
+    }
+    update() {
+        this.title = this.shop.name;
+
+        this.subtitles = this.shop.description.slice();
+        this.subtitles.push('');
+
+        var LBRACKET = '> ';
+        var RBRACKET = ' <';
+
+        if(!this.shop.items.length) {
+            this.subtitles.push('...nothing left to buy!');
+        }
+
+        var subtitle = 'Leave the shop';
+        if(this.item_i === -1) {
+            subtitle = LBRACKET + subtitle + RBRACKET;
+        }
+        this.subtitles.push(subtitle);
+
+        var selected_item = this.getSelectedItem();
+
+        for(var i = 0; i < this.shop.items.length; i++) {
+            var item = this.shop.items[i];
+
+            var subtitle = item.name;
+            if(item.bought) {
+                subtitle = '[BOUGHT] ' + subtitle;
+            } else if(item.price > this.player.gold) {
+                subtitle = '[CAN\'T AFFORD] ' + subtitle;
+            } else if(item.cantBuy(this.player)) {
+                subtitle = '[CAN\'T BUY] ' + subtitle;
+            }
+            if(item === selected_item) {
+                subtitle = LBRACKET + subtitle + RBRACKET;
+            }
+            this.subtitles.push(subtitle);
+        }
+
+        if(selected_item) {
+            this.subtitles.push('');
+            this.subtitles.push(selected_item.description);
+
+            var cantBuy = selected_item.cantBuy(this.player);
+            if(cantBuy) this.subtitles.push(
+                "[Can't buy this: " + cantBuy + ']');
+        }
+    }
+    keyDown(keyCode) {
+        if(!this.player) return;
+        if(keyCode === KEY_U) {
+            if(this.item_i > -1) this.item_i--;
+            this.update();
+        } else if(keyCode === KEY_D) {
+            if(this.item_i < this.shop.items.length - 1) this.item_i++;
+            this.update();
+        } else if(keyCode === KEY_ENTER) {
+            if(this.item_i === -1) {
+                this.finish();
+            } else {
+                var item = this.getSelectedItem();
+                if(item && !item.cantBuy(this.player)) {
+                    item.buy(this.player);
+                    this.update();
+                }
+            }
+        } else if(keyCode === KEY_ESCAPE) {
+            this.finish();
+        }
+    }
+    render() {
+        this.game.renderTitle(this.title, this.subtitles);
+    }
+    finish() {
+        // That is, "leave the shop"
+        this.game.unsetMenu();
     }
 }
 
@@ -3429,6 +3580,10 @@ class WarpMapMenu extends MapMenu {
             progress.setEdge(this.edge);
             progress.proceed();
 
+            // We do this before calling game.warp(), because game.warp()
+            // may call game.setMenu(ShopMenu)
+            this.game.unsetMenu();
+
             this.game.warp();
 
             // HACK: we assume first player is who camera should be targeting.
@@ -3436,8 +3591,6 @@ class WarpMapMenu extends MapMenu {
             // the ship, so game.camera.target gets set to null, so game.warp()
             // has no way to know what the camera should be pointed at.
             this.game.camera.setTarget(this.game.players[0].entity);
-
-            this.game.unsetMenu();
         } else {
             super.keyDown(keyCode);
         }
@@ -5608,6 +5761,110 @@ class Planet extends Entity {
     }
 }
 
+class ShopItem {
+    name = 'Item';
+    price = 10;
+    bought = false;
+
+    cantBuy(player) {
+        // To be overridden by subclasses
+        // Returns false if player *CAN* buy this item, otherwise returns
+        // a string (to be displayed to player) describing why they *CAN'T*.
+        // Don't you dare question my design decisions.
+
+        if(this.bought) {
+            return 'Already bought!';
+        }
+
+        if(player.gold < this.price) {
+            return 'Not enough gold!';
+        }
+
+        return null;
+    }
+    buy() {
+        // To be overridden by subclasses
+        // We assume this.cantBuy(player) has already been called successfully
+        // (without throwing ShopItemBuyError)
+
+        player.gold -= this.price;
+        this.bought = true;
+    }
+}
+
+class TrinketShopItem extends ShopItem {
+    constructor(name, price, description) {
+        super();
+        this.name = name;
+        this.price = price;
+        this.description = description;
+    }
+    buy(player) {
+        super.buy(player);
+
+        var trinket = new Trinket(this.name, this.description);
+        player.trinkets.push(trinket);
+    }
+}
+
+class MaxEnergyShopItem extends ShopItem {
+    constructor(energy) {
+        super();
+        this.energy = energy;
+        this.name = '+' + String(energy) + ' Max Energy';
+        this.price = 20 + energy * 2;
+    }
+    buy(player) {
+        super.buy(player);
+        player.addMaxHp(this.energy);
+    }
+}
+
+class MaxFuelShopItem extends ShopItem {
+    constructor(fuel) {
+        super();
+        this.fuel = fuel;
+        this.name = '+' + String(fuel) + ' Max Fuel';
+        this.price = 20 + fuel * 2;
+    }
+    buy(player) {
+        super.buy(player);
+        player.maxfuel += this.fuel;
+    }
+}
+
+class ShipShopItem extends ShopItem {
+    constructor(cls, price) {
+        super();
+        this.cls = cls;
+        this.name = 'Ship: ' + cls.name;
+        this.price = price;
+    }
+    cantBuy(player) {
+        var value = super.cantBuy(player);
+        if(value) return value;
+
+        if(player.shipClasses.indexof(this.cls) >= 0) {
+            return 'Already have ship: ' + this.cls.name;
+        }
+        return null;
+    }
+    buy(player) {
+        super.buy(player);
+        player.shipClasses.push(this.cls);
+    }
+}
+
+class Shop {
+    constructor(name, description, items) {
+        this.name = name;
+        this.description = description;
+
+        // items: Array of ShopItem
+        this.items = items;
+    }
+}
+
 
 var SHIP_CLASSES = new OrderedDict()
     .set('fighter', FighterShip)
@@ -5794,6 +6051,8 @@ var defaultMap = new function() {
                     'very tall area.',
                     '',
                     'Also... notice how space wraps around? Weird huh.',
+                    'That\'s true in every area, it\'s just more obvious',
+                    'in this one because it\'s so wide.',
                 ]),
             }), {intro5: 1}),
         intro4b: defnode('Introduction',
@@ -5810,6 +6069,8 @@ var defaultMap = new function() {
                     'very wide area.',
                     '',
                     'Also... notice how space wraps around? Weird huh.',
+                    'That\'s true in every area, it\'s just more obvious',
+                    'in this one because it\'s so tall.',
                 ]),
             }), {intro5: 1}),
         intro5: defnode('Introduction',
@@ -5827,9 +6088,20 @@ var defaultMap = new function() {
         intro6: defnode('Shop',
             mktemplate({
                 rocks_per: new MinMax(0),
-                text: new Text('Shop', [
-                    '...TODO: implement shops.',
-                ]),
+                shop: new Shop('Introductory Shop',
+                    [
+                        'There are shops in space!',
+                        'And the only currency they accept is, uh, gold pieces.',
+                    ],
+                    [
+                        new TrinketShopItem('Useless Trinket', 5,
+                            "It may not be very useful, but it's *yours*."),
+                        Object.assign(new MaxEnergyShopItem(10), {
+                            description:
+                                "This would be really useful, " +
+                                "if you could afford it."
+                        }),
+                    ]),
             }), {basic0: 1}),
 
         // BASIC TRAINING
@@ -5975,6 +6247,7 @@ game.mapKey(player.keys.r, KEY_R);
 game.mapKey(player.keys.x, KEY_SPACE);
 game.mapKey(player.keys.y, KEY_SHIFT);
 
+if(game.field.shop) game.setMenu(ShopMenu);
 game.setMenu(ChooseShipMenu);
 
 game.play();
