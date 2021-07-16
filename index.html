@@ -111,6 +111,8 @@ function getBoolParam(name) {
 
 // debug stuff
 var DEBUG = getBoolParam('debug');
+var ALLSHIPS = DEBUG || getBoolParam('allships');
+var RICH = DEBUG || getBoolParam('rich');
 var TIMING = getBoolParam('timing');
 var RENDER_CIRCLES = getBoolParam('render_circles');
 var RENDER_BOUNDARY = getBoolParam('render_boundary');
@@ -135,7 +137,7 @@ var MAX_ROT_VEL = Math.PI / 5;
 var DEFAULT_ADDHP = 1 / 40;
 var DEFAULT_ADDFUEL = 1 / 80;
 var DEFAULT_MAXFUEL = 100;
-var MAXGOLD = 100;
+var MAXGOLD = 999;
 var WARP_COLLISION_DAMAGE = 10;
 var WARP_FUEL = 10;
 
@@ -1876,6 +1878,8 @@ var blockyWriter = new Writer({
     7: blockyDigits.getPicture('7'),
     8: blockyDigits.getPicture('8'),
     9: blockyDigits.getPicture('9'),
+    '[': blockyDigits.getPicture('['),
+    ']': blockyDigits.getPicture(']'),
 });
 
 var ENERGY_PICTURE = blockyWriter.getPicture('E');
@@ -2735,9 +2739,9 @@ class Player {
     fuel = DEFAULT_MAXFUEL / 2;
 
     maxgold = MAXGOLD;
-    gold = DEBUG? MAXGOLD: 0;
+    gold = RICH? MAXGOLD: 0;
 
-    shipClasses = DEBUG? SHIP_CLASSES.getValues():
+    shipClasses = ALLSHIPS? SHIP_CLASSES.getValues():
         [FighterShip, ScoutShip, AssaultShip];
 
     // gamepad: an HTML5 Gamepad instance, or null
@@ -5763,6 +5767,7 @@ class Planet extends Entity {
 
 class ShopItem {
     name = 'Item';
+    description = 'An item you can buy in a shop.';
     price = 10;
     bought = false;
 
@@ -5796,8 +5801,8 @@ class TrinketShopItem extends ShopItem {
     constructor(name, price, description) {
         super();
         this.name = name;
-        this.price = price;
-        this.description = description;
+        this.price = getDefault(price, 0);
+        this.description = getDefault(description, 'A useless trinket.');
     }
     buy(player) {
         super.buy(player);
@@ -5808,6 +5813,8 @@ class TrinketShopItem extends ShopItem {
 }
 
 class MaxEnergyShopItem extends ShopItem {
+    description = 'Permanently increases the maximum energy of your ship.';
+
     constructor(energy) {
         super();
         this.energy = energy;
@@ -5821,6 +5828,8 @@ class MaxEnergyShopItem extends ShopItem {
 }
 
 class MaxFuelShopItem extends ShopItem {
+    description = 'Permanently increases your maximum fuel.';
+
     constructor(fuel) {
         super();
         this.fuel = fuel;
@@ -5834,6 +5843,8 @@ class MaxFuelShopItem extends ShopItem {
 }
 
 class ShipShopItem extends ShopItem {
+    description = 'Use ships you\'ve bought in the "Choose Ship" menu (hit Escape).';
+
     constructor(cls, price) {
         super();
         this.cls = cls;
@@ -5844,7 +5855,7 @@ class ShipShopItem extends ShopItem {
         var value = super.cantBuy(player);
         if(value) return value;
 
-        if(player.shipClasses.indexof(this.cls) >= 0) {
+        if(player.shipClasses.indexOf(this.cls) >= 0) {
             return 'Already have ship: ' + this.cls.name;
         }
         return null;
@@ -5949,37 +5960,6 @@ var defaultMap = new function() {
         // a MapNode.
         return {title: title, template: template, edges: edges};
     }
-
-    /*
-    fighter
-    scout
-    assault
-    torch
-    turret
-    flag
-    mole
-    crab
-    ram
-    hunter
-    swarm
-    engineer
-    troop
-
-    Green team:
-        Mostly fighter, scout, assault
-        Often has low chance of flagship
-    Yellow team:
-        "utility" ships like mole, engineer?..
-        Most common fighting ship is scout?..
-    Blue team:
-        They like asteroids. Miners?..
-        Assault, hunter, swarm?..
-    Red team:
-        torch, ram, crab, troop?.. is the fire motif too obvious? :P
-
-    Asteroid belt:
-        Sweeps kind of northwest to southeast across the map
-    */
 
     var nodes = mknodes({
 
@@ -6092,6 +6072,7 @@ var defaultMap = new function() {
                     [
                         'There are shops in space!',
                         'And the only currency they accept is, uh, gold pieces.',
+                        'Use the arrow keys to change selected item, and Enter to buy.',
                     ],
                     [
                         new TrinketShopItem('Useless Trinket', 5,
@@ -6125,7 +6106,23 @@ var defaultMap = new function() {
             mktemplate({ships: mkships({
                 green: {fighter: .5, assault: 1, flag: .5},
                 yellow: {fighter: 2, scout: 1, mole: .5},
-            })}), {basic3: 2}),
+            })}), {basic_shop: 3, basic3: 2}),
+        basic_shop: defnode('Basic Shop',
+            mktemplate({
+                shop: new Shop('Basic Shop',
+                    ['Basic stuff like upgrades and fancy new ships.'],
+                    [
+                        new MaxEnergyShopItem(10),
+                        new MaxEnergyShopItem(10),
+                        new MaxFuelShopItem(10),
+                        new MaxFuelShopItem(10),
+                        new ShipShopItem(TurretShip, 40),
+                        new ShipShopItem(HunterShip, 40),
+                        new ShipShopItem(TroopShip, 40),
+                        new ShipShopItem(SwarmShip, 40),
+                        new ShipShopItem(FlagShip, 100),
+                    ]),
+            }), {basic0: 2, fire0: 4, corridor0: 2}),
         basic3: defnode('Basic Training',
             mktemplate({ships: mkships({
                 green: {assault: 1, scout: 1},
@@ -6150,7 +6147,25 @@ var defaultMap = new function() {
                 rock_radius: new MinMax(.15, .75),
                 ships_per: new MinMax(2),
                 ships: mkships({red: {torch: 1}}),
-            }), {basic2: 1}),
+            }), {fire_shop: 1, basic2: 1}),
+        fire_shop: defnode('Fire Shop',
+            mktemplate({
+                height: new MinMax(3),
+                rocks_per: new MinMax(10,30),
+                rock_radius: new MinMax(.15, .75),
+                shop: new Shop('Fire Shop',
+                    ['There is a shop among the flames.'],
+                    [
+                        new TrinketShopItem('Fire Trinket', 10,
+                            'Proves you made it to the Fire area.'),
+                        new MaxEnergyShopItem(40),
+                        new MaxFuelShopItem(20),
+                        new MaxFuelShopItem(20),
+                        new ShipShopItem(TorchShip, 40),
+                        new ShipShopItem(RamShip, 40),
+                        new ShipShopItem(CrabShip, 40),
+                    ]),
+            }), {fire1: 1}),
 
         // CORRIDOR
         // A series of wide fields, with not many rocks, stars, or planets.
@@ -6226,7 +6241,26 @@ var defaultMap = new function() {
                     yellow: {scout: 1, mole: 1, engineer: 1},
                     red: {mole: .5, troop: 2},
                 }),
-            }), {basic1: 2}),
+            }), {rock_shop: 1, basic1: 2}),
+        rock_shop: defnode('Rock Shop',
+            mktemplate({
+                width: new MinMax(2),
+                rocks_per: new MinMax(20),
+                rock_radius: new MinMax(.5, 1.5),
+                shop: new Shop('Rock Shop',
+                    [],
+                    [
+                        new TrinketShopItem('Rock Trinket', 10,
+                            'Proves you made it to the Rock area.'),
+                        new MaxEnergyShopItem(20),
+                        new MaxEnergyShopItem(20),
+                        new MaxFuelShopItem(30),
+                        new ShipShopItem(MoleShip, 40),
+                        new ShipShopItem(EngineerShip, 40),
+                        new ShipShopItem(BoreShip, 100),
+                        new ShipShopItem(MinerShip, 100),
+                    ]),
+            }), {rock1: 1}),
     });
 
     var startNodeName = getParam('start_node');
