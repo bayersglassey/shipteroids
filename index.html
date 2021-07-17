@@ -53,6 +53,9 @@ body {
 *
 * Really big ship (MotherShip) with "gravity"
 *
+* "Ball and chain" ship (hold attack to send out chain on spring, release
+* to have it come back to you)
+*
 * Slightly better AI: each CPUPlayer can have 1 target, which is rendered
 * as a line. By default, when cpu player is hit, it targets the shot's ship.
 * cpu should probably understand the range of its weapons.
@@ -66,9 +69,6 @@ body {
 *
 * TODO:
 *
-* MapMenu: your destination (node1) needs to be highlighted, and it needs to
-* be clear which direction you're travelling.
-*
 * When a Field is populated, we should make sure things don't overlap,
 * otherwise everything will start immediately rocketing around the screen.
 *
@@ -81,16 +81,18 @@ body {
 *
 * Seems like one end of RopeShot can get stuck to something and live forever...
 *
-* How can we add upgrades?
-* Do we add shops?
-*   * Do they show up on the Field?
-*   * Do you just warp to them?
-*     * I kind of like that. So add special ShopMapNode, or MapNode.shop,
-*       or something.
-* Can you mine planets? Maybe some ships are better at it?
-*   * What is the mechanism?.. land on the planet?.. just hover over it?..
-*   * Do planets shrink as they are mined? Or how do you tell how much
-*     stuff is left?..
+* Better instructions, "story"...
+* Collectables which affect the map. ("switches"? "keys"?)
+* Warping is fiddly, so start game with it disabled.
+* So first area, you first must prove that you've learned how to fly around,
+* shoot, etc.
+* So maybe something like, aside from the "SHIPteroids" rocks in first area,
+* there is also some kind of switch thing. Which has no velocity, even if
+* rocks hit it. So that you must fly to it, not just get lucky that it
+* floats by.
+* And you must fly to it and shoot it.
+* And that... opens a portal?.. or just like... results in warping being
+* unlocked? O_o
 *
 ******************************/
 
@@ -140,6 +142,8 @@ var DEFAULT_MAXFUEL = 100;
 var MAXGOLD = 999;
 var WARP_COLLISION_DAMAGE = 10;
 var WARP_FUEL = 10;
+var MIN_NODE_RADIUS = 5;
+var MAX_NODE_RADIUS = 20;
 
 // Game/field default options
 var DEFAULT_FIELD_WIDTH  = 1000;
@@ -151,7 +155,7 @@ var DEFAULT_SHIPS_PER    = 1 /  500000;
 var DEFAULT_STAR_SPEED = 3;
 var DEFAULT_ENERGY_CHANCE = .05;
 var DEFAULT_FUEL_CHANCE = .1;
-var DEFAULT_GOLD_CHANCE = .2;
+var DEFAULT_GOLD_CHANCE = .5;
 
 // keyCode values
 var KEY_U = 38;
@@ -942,12 +946,18 @@ class FieldTemplate {
 class MapNode extends Particle {
     /* A node of the graph represented by class Map. */
 
-    constructor(map, template, title) {
+    constructor(map, template, title, description) {
         super();
+
+        description = getDefault(description, []);
 
         this.map = map;
         this.template = template;
         this.title = title;
+
+        // description: Array of string
+        this.description = description;
+
         this.edges = [];
         this.backedges = [];
 
@@ -957,7 +967,7 @@ class MapNode extends Particle {
         var speed = Random.randNumber(250);
         var rot = Random.randRotation();
         this.pos.addSpeed(speed, rot);
-        this.radius = Random.randNumber(9, 15);
+        this.radius = Random.randNumber(MIN_NODE_RADIUS, MAX_NODE_RADIUS);
 
         this.strokeStyle = Random.randColor(80, 256, .75);
         this.fillStyle = 'rgba(255,255,255,.25)';
@@ -1010,7 +1020,7 @@ class MapEdge {
         this.forwardEdge = new DirectedMapEdge(this, false);
         this.backEdge = new DirectedMapEdge(this, true);
 
-        this.strokeStyle = Random.randColor(0, 200, .75);
+        this.strokeStyle = Random.randColor(40, 200, .75);
     }
 }
 
@@ -1048,8 +1058,8 @@ class Map {
         if(this.nodes.length) return this.nodes[0];
         return null;
     }
-    addNode(template, title) {
-        var node = new MapNode(this, template, title);
+    addNode(template, title, description) {
+        var node = new MapNode(this, template, title, description);
         this.nodes.push(node);
         return node;
     }
@@ -1118,11 +1128,16 @@ class MapProgress {
         }
     }
     canProceed() {
-        return Boolean(this.edge);
+        if(this.edge) return true;
+        return this.node.numEdges() <= 1;
     }
     setEdge(edge) {
-        if(this.canProceed()) {
-            throw new Error("Can't set edge yet, must proceed first");
+        if(this.edge) {
+            throw new Error("Can't set edge yet, it's already set");
+        }
+        if(this.node !== edge.getNode0()) {
+            console.log(this.node, edge);
+            throw new Error("Edge does not start at current node");
         }
         this.edge = edge;
         this.edgeDist = 0;
@@ -1133,14 +1148,24 @@ class MapProgress {
             throw new Error("Can't proceed yet, must set edge first");
         }
 
-        if(this.edgeDist < this.edge.getLen() - 1) {
-            this.edgeDist++;
+        if(this.edge) {
+            if(this.edgeDist < this.edge.getLen() - 1) {
+                this.edgeDist++;
+            } else {
+                this.node = this.edge.getNode1();
+                this.edge = null;
+            }
+            this.updateTemplate();
+        } else if(this.node.numEdges() === 1) {
+            var edge = this.node.getEdge(0);
+            this.setEdge(edge);
+            this.proceed();
         } else {
-            this.node = this.edge.getNode1();
-            this.edge = null;
+            console.log(this.node);
+            throw new Error(
+                "Node doesn't have exactly 1 edge! "
+                + "It has " + this.node.numEdges());
         }
-
-        this.updateTemplate();
     }
     updateTemplate() {
         if(!this.edge) {
@@ -3300,7 +3325,7 @@ class ShopMenu extends Menu {
         for(var i = 0; i < this.shop.items.length; i++) {
             var item = this.shop.items[i];
 
-            var subtitle = item.name;
+            var subtitle = item.name + ' (' + item.price + ' G)';
             if(item.bought) {
                 subtitle = '[BOUGHT] ' + subtitle;
             } else if(item.price > this.player.gold) {
@@ -3477,6 +3502,11 @@ class MapMenu extends Menu {
             lines.push('Distance: ' + this.edge.getLen());
         }
 
+        if(this.node.description.length) {
+            lines.push('');
+            lines = lines.concat(this.node.description);
+        }
+
         this.addControls(lines);
 
         this.text = new Text(title, lines);
@@ -3508,9 +3538,14 @@ class MapMenu extends Menu {
         var progress = this.game.progress;
         var map = progress.map;
 
-        var progressPos = progress.getPos();
-        var x0 = canvas.width / 2 - progressPos.x;
-        var y0 = canvas.height / 2 - progressPos.y;
+        var pos0 = this.node === progress.node?
+            progress.getPos(): this.node.pos;
+
+        var x0 = canvas.width / 2 - pos0.x;
+        var y0 = canvas.height / 2 - pos0.y;
+
+        // Point used for calculations
+        var p = new Point();
 
         for(var node of map.nodes) {
             var x = x0 + node.pos.x;
@@ -3532,6 +3567,7 @@ class MapMenu extends Menu {
 
             for(var edge of node.edges) {
                 var node2 = edge.node1;
+                var edgeAngle = node.pos.angle(node2.pos);
                 var x2 = x0 + node2.pos.x;
                 var y2 = y0 + node2.pos.y;
                 var strokeStyle = edge.strokeStyle;
@@ -3544,12 +3580,43 @@ class MapMenu extends Menu {
 
                 ctx.lineWidth = lineWidth;
                 ctx.strokeStyle = strokeStyle;
+                ctx.fillStyle = 'rgba(255,255,255,.2)';
 
+                // Draw the edge's line
                 ctx.beginPath();
                 ctx.moveTo(x, y);
                 ctx.lineTo(x2, y2);
                 ctx.closePath();
                 ctx.stroke();
+
+                // arrowPointSideLen: length in pixels of side of arrow's point
+                var arrowPointSideLen = 12
+                    * linear(node.radius, node2.radius, .75) / MAX_NODE_RADIUS
+                    * edge.len;
+
+                // arrowPointAngle: the angle of the arrow's point
+                // (the smaller this is, the pointier the arrow is)
+                var arrowPointAngle = Math.PI / 5;
+
+                // arr_x, arr_y: the point of the arrow (partway between edge's
+                // start and end nodes)
+                var arr_m = .75;
+                var arr_x = linear(x, x2, arr_m);
+                var arr_y = linear(y, y2, arr_m);
+
+                // Draw the edge's arrow
+                ctx.beginPath();
+                ctx.moveTo(arr_x, arr_y);
+                p.set(arr_x, arr_y).addSpeed(arrowPointSideLen,
+                    edgeAngle + arrowPointAngle / 2 + Math.PI);
+                ctx.lineTo(p.x, p.y);
+                p.set(arr_x, arr_y).addSpeed(arrowPointSideLen,
+                    edgeAngle - arrowPointAngle / 2 + Math.PI);
+                ctx.lineTo(p.x, p.y);
+                ctx.lineTo(arr_x, arr_y);
+                ctx.closePath();
+                ctx.stroke();
+                ctx.fill();
             }
         }
     }
@@ -5938,7 +6005,8 @@ var defaultMap = new function() {
         var nodes = {};
         for(var nodeName in nodeMap) {
             var nodeProps = nodeMap[nodeName];
-            var node = map.addNode(nodeProps.template, nodeProps.title);
+            var node = map.addNode(nodeProps.template,
+                nodeProps.title, nodeProps.description);
             nodes[nodeName] = node;
         }
         for(var nodeName in nodeMap) {
@@ -5955,17 +6023,22 @@ var defaultMap = new function() {
         return nodes;
     }
 
-    function defnode(title, template, edges) {
+    function defnode(title, description, template, edges) {
         // "defnode" not "mknode" because we don't actually return
         // a MapNode.
-        return {title: title, template: template, edges: edges};
+        return {
+            title: title,
+            description: description,
+            template: template,
+            edges: edges,
+        };
     }
 
     var nodes = mknodes({
 
         // INTRODUCTION
         // A series of fields, comprising the title screen and tutorial.
-        intro0: defnode('Introduction',
+        intro0: defnode('Introduction', [],
             mktemplate({
                 rocks_per: new MinMax(0),
                 rocksText: 'SHIPteroids',
@@ -5977,7 +6050,7 @@ var defaultMap = new function() {
                     'Try not to hit things while warping.',
                 ]),
             }), {intro1: 1}),
-        intro1: defnode('Introduction',
+        intro1: defnode('Introduction', [],
             mktemplate({
                 rocks_per: new MinMax(1),
                 energy_chance: .5,
@@ -5990,7 +6063,7 @@ var defaultMap = new function() {
                     'Shoot asteroids open to find more.',
                 ]),
             }), {intro2: 1}),
-        intro2: defnode('Introduction',
+        intro2: defnode('Introduction', [],
             mktemplate({
                 rocks_per: new MinMax(2),
                 ships_per: new MinMax(2),
@@ -6003,6 +6076,11 @@ var defaultMap = new function() {
                 ]),
             }), {intro3: 1}),
         intro3: defnode('Introduction',
+            [
+                'Welcome to the map!',
+                'When warping, you move along the arrows on the map.',
+                'When the path branches, you must choose which way to go.',
+            ],
             mktemplate({
                 rocks_per: new MinMax(.4),
                 gold_chance: 1,
@@ -6017,55 +6095,43 @@ var defaultMap = new function() {
                     'You can always warp away instead of fighting.',
                 ]),
             }), {intro4a: 1, intro4b: 1}),
-        intro4a: defnode('Introduction',
+        intro4a: defnode('Introduction', [],
             mktemplate({
                 width: new MinMax(4),
                 height: new MinMax(.3),
                 rocks_per: new MinMax(3),
                 planets_per: new MinMax(0),
                 text: new Text('The map', [
-                    'Did you notice how, when warping this time,',
-                    'you were given a choice of branching paths?',
-                    'This branch took you to a very wide area.',
-                    'The other branch would have taken you to a',
-                    'very tall area.',
-                    '',
-                    'Also... notice how space wraps around? Weird huh.',
+                    'Notice how space wraps around? Weird huh.',
                     'That\'s true in every area, it\'s just more obvious',
                     'in this one because it\'s so wide.',
                 ]),
             }), {intro5: 1}),
-        intro4b: defnode('Introduction',
+        intro4b: defnode('Introduction', [],
             mktemplate({
                 width: new MinMax(.3),
                 height: new MinMax(4),
                 rocks_per: new MinMax(3),
                 planets_per: new MinMax(0),
                 text: new Text('The map', [
-                    'Did you notice how, when warping this time,',
-                    'you were given a choice of branching paths?',
-                    'This branch took you to a very tall area.',
-                    'The other branch would have taken you to a',
-                    'very wide area.',
-                    '',
-                    'Also... notice how space wraps around? Weird huh.',
+                    'Notice how space wraps around? Weird huh.',
                     'That\'s true in every area, it\'s just more obvious',
                     'in this one because it\'s so tall.',
                 ]),
             }), {intro5: 1}),
-        intro5: defnode('Introduction',
+        intro5: defnode('Introduction', [],
             mktemplate({
                 rocks_per: new MinMax(3),
                 energy_chance: 0,
                 fuel_chance: .75,
                 text: new Text('Long warps', [
-                    'Some areas on the map are farther apart.',
-                    'Travelling between them takes multiple warps.',
-                    'It will take 2 warps to get to the next area,',
-                    'so stock up on fuel here.',
+                    'Hold Tab to look at the map now, and you will see that',
+                    'the "distance" to the next area is 2.',
+                    'That means it will take 2 warps to get to the next area.',
+                    'So stock up on fuel here! These asteroids are full of it...',
                 ]),
             }), {intro6: 2}),
-        intro6: defnode('Shop',
+        intro6: defnode('Shop', [],
             mktemplate({
                 rocks_per: new MinMax(0),
                 shop: new Shop('Introductory Shop',
@@ -6088,26 +6154,28 @@ var defaultMap = new function() {
         // BASIC TRAINING
         // A circular set of fields, introducing you to the most common
         // types of ship.
-        basic0: defnode('Basic Training',
+        basic0: defnode('Basic Training', [],
             mktemplate({
-                ships_per: new MinMax(.5),
+                ships_per: new MinMax(.75),
                 ships: mkships({
+                    green: {fighter: 1},
                     blue: {fighter: 1},
                 }),
             }), {basic1: 1}),
-        basic1: defnode('Basic Training',
+        basic1: defnode('Basic Training', [],
             mktemplate({
-                ships_per: new MinMax(.5),
+                ships_per: new MinMax(.75),
                 ships: mkships({
-                    blue: {fighter: 1},
+                    green: {scout: 1},
+                    blue: {assault: 1},
                 }),
             }), {basic2: 2}),
-        basic2: defnode('Basic Training',
+        basic2: defnode('Basic Training', [],
             mktemplate({ships: mkships({
                 green: {fighter: .5, assault: 1, flag: .5},
                 yellow: {fighter: 2, scout: 1, mole: .5},
-            })}), {basic_shop: 3, basic3: 2}),
-        basic_shop: defnode('Basic Shop',
+            })}), {basic3: 2, basic_shop: 3}),
+        basic_shop: defnode('Basic Shop', [],
             mktemplate({
                 shop: new Shop('Basic Shop',
                     ['Basic stuff like upgrades and fancy new ships.'],
@@ -6122,8 +6190,8 @@ var defaultMap = new function() {
                         new ShipShopItem(SwarmShip, 40),
                         new ShipShopItem(FlagShip, 100),
                     ]),
-            }), {basic0: 2, fire0: 4, corridor0: 2}),
-        basic3: defnode('Basic Training',
+            }), {basic2: 2}),
+        basic3: defnode('Basic Training', [],
             mktemplate({ships: mkships({
                 green: {assault: 1, scout: 1},
                 yellow: {fighter: 1, mole: 1},
@@ -6132,7 +6200,7 @@ var defaultMap = new function() {
 
         // FIRE
         // A place full of torches and rams. Presumably red team's home base.
-        fire0: defnode('Fire',
+        fire0: defnode('Fire', [],
             mktemplate({
                 height: new MinMax(3),
                 rocks_per: new MinMax(.5),
@@ -6140,15 +6208,15 @@ var defaultMap = new function() {
                 ships_per: new MinMax(2),
                 ships: mkships({red: {ram: 1, torch: .25}}),
             }), {fire1: 2}),
-        fire1: defnode('Fire',
+        fire1: defnode('Fire', [],
             mktemplate({
                 height: new MinMax(3),
                 rocks_per: new MinMax(10,30),
                 rock_radius: new MinMax(.15, .75),
                 ships_per: new MinMax(2),
                 ships: mkships({red: {torch: 1}}),
-            }), {fire_shop: 1, basic2: 1}),
-        fire_shop: defnode('Fire Shop',
+            }), {basic2: 1, fire_shop: 1}),
+        fire_shop: defnode('Fire Shop', [],
             mktemplate({
                 height: new MinMax(3),
                 rocks_per: new MinMax(10,30),
@@ -6171,7 +6239,7 @@ var defaultMap = new function() {
         // A series of wide fields, with not many rocks, stars, or planets.
         // Mostly blue team (assault+hunter), with some red (crab+hunter).
         // Maybe the first time you meet hunters?..
-        corridor0: defnode('Corridor',
+        corridor0: defnode('Corridor', [],
             mktemplate({
                 width: new MinMax(1, 2),
                 height: new MinMax(.5, 1),
@@ -6185,7 +6253,7 @@ var defaultMap = new function() {
                     red: {crab: 1},
                 }),
             }), {corridor1: 4}),
-        corridor1: defnode('Corridor',
+        corridor1: defnode('Corridor', [],
             mktemplate({
                 width: new MinMax(2, 3),
                 height: new MinMax(1),
@@ -6199,7 +6267,7 @@ var defaultMap = new function() {
                     red: {crab: 1, hunter: .5},
                 }),
             }), {corridor2: 4}),
-        corridor2: defnode('Corridor',
+        corridor2: defnode('Corridor', [],
             mktemplate({
                 width: new MinMax(2, 3),
                 height: new MinMax(1, 2),
@@ -6216,7 +6284,7 @@ var defaultMap = new function() {
 
         // ROCK
         // A big field, full of rocks, bit of every team, lots of moles & suits.
-        rock0: defnode('Rock',
+        rock0: defnode('Rock', [],
             mktemplate({
                 width: new MinMax(2),
                 rocks_per: new MinMax(10),
@@ -6229,7 +6297,7 @@ var defaultMap = new function() {
                     red: {crab: 1},
                 }),
             }), {rock1: 2}),
-        rock1: defnode('Rock',
+        rock1: defnode('Rock', [],
             mktemplate({
                 width: new MinMax(2),
                 rocks_per: new MinMax(20),
@@ -6241,8 +6309,8 @@ var defaultMap = new function() {
                     yellow: {scout: 1, mole: 1, engineer: 1},
                     red: {mole: .5, troop: 2},
                 }),
-            }), {rock_shop: 1, basic1: 2}),
-        rock_shop: defnode('Rock Shop',
+            }), {basic1: 2, rock_shop: 1}),
+        rock_shop: defnode('Rock Shop', [],
             mktemplate({
                 width: new MinMax(2),
                 rocks_per: new MinMax(20),
