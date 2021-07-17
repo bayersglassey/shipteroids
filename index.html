@@ -4681,6 +4681,19 @@ class SuitShip extends Ship {
         if(other === this.rock) return true;
         return super._isAlly(other);
     }
+    stepCPUKey(key) {
+        if(key.name === 'u' && this.rock) {
+            // Usually don't exit your rock
+            if(Math.random() < .001) key.down();
+            else key.up();
+        } else if(key.name === 'y' && !this.rock) {
+            // Try to enter rocks
+            if(Math.random() < .5) key.down();
+            else key.up();
+        } else {
+            super.stepCPUKey(key);
+        }
+    }
 }
 
 class MinerShip extends SuitShip {
@@ -4691,7 +4704,7 @@ class MinerShip extends SuitShip {
         y: null,
     };
 
-    dig_cooldown = 30;
+    dig_cooldown = 100;
 
     // How much of a rock's radius we dig away from it
     dig_radius = 1 * RADIUSMUL;
@@ -4957,7 +4970,7 @@ function _initSwarmShip(leader) {
     }
 
     this.shotClass = {
-        x: leader? BoldShortSingleShot: ShortSingleShot,
+        x: leader? BoldSlowSingleShot: SlowSingleShot,
         y: null,
     };
 
@@ -5180,7 +5193,12 @@ class ShortSingleShot extends SingleShot {
     static cooldown = 3;
 }
 
-class BoldShortSingleShot extends SingleShot {
+class SlowSingleShot extends SingleShot {
+    static initialSpeed = 17;
+    static cooldown = 5;
+}
+
+class BoldSlowSingleShot extends SlowSingleShot {
     trailStrokeStyle = '#fa0';
     trailLineWidth = 3;
 }
@@ -5677,9 +5695,9 @@ class RopeShot extends Shot {
 
 class BoreShot extends Shot {
     radius = 6 * RADIUSMUL;
-    static initialSpeed = 14;
+    static initialSpeed = 16;
     static initialVelMul = .9;
-    velmul = .95;
+    velmul = .965;
 
     hitVelMul = .5;
     hitDamage = 15;
@@ -5691,11 +5709,21 @@ class BoreShot extends Shot {
     static vibrateWeakMagnitude = .2;
     static vibrateStrongMagnitude = .6;
 
-    picture = Picture.newPolygon(3);
+    picture = new Picture([
+        new Shape([
+            new Point( 1 ,  0),
+            new Point( .5, -1),
+            new Point(-1 , -1),
+            new Point(-1 ,  1),
+            new Point( .5,  1),
+        ]).mulxy(1, .5),
+    ]);
+
+    gold_chance = 1;
 
     hit(other) {
         if(other instanceof Rock) {
-            this.emitPickup(GoldPickup);
+            if(Math.random() < this.gold_chance) this.emitPickup(GoldPickup);
             other.dieFromDamage();
             this.die();
         } else {
@@ -6280,7 +6308,7 @@ var defaultMap = new function() {
                     blue: {assault: 1, hunter: .5, flag: .5},
                     red: {crab: 1, hunter: .5, ram: 1},
                 }),
-            }), {rock0: 3}),
+            }), {rock0: 3, mines0: 3}),
 
         // ROCK
         // A big field, full of rocks, bit of every team, lots of moles & suits.
@@ -6329,6 +6357,47 @@ var defaultMap = new function() {
                         new ShipShopItem(MinerShip, 100),
                     ]),
             }), {rock1: 1}),
+
+        // MINES
+        // Full of asteroids, miners, and bores.
+        // And... swarms, to add some danger to it all.
+        mines0: defnode('Mines', [],
+            mktemplate({
+                width: new MinMax(2),
+                height: new MinMax(2),
+                rocks_per: new MinMax(3),
+                rock_radius: new MinMax(1, 2),
+                ships_per: new MinMax(2),
+                ships: mkships({
+                    green: {mole: 1},
+                    yellow: {mole: 1},
+                    red: {swarm: 1},
+                }),
+            }), {mines1: 2}),
+        mines1: defnode('Mines', [],
+            mktemplate({
+                width: new MinMax(3),
+                height: new MinMax(3),
+                rocks_per: new MinMax(2),
+                rock_radius: new MinMax(1, 2),
+                ships_per: new MinMax(1.2),
+                ships: mkships({
+                    green: {mole: 1, miner: 1},
+                    yellow: {mole: 1, miner: 1},
+                    blue: {swarm: 2},
+                }),
+            }), {mines2: 2}),
+        mines2: defnode('Mines', [],
+            mktemplate({
+                width: new MinMax(2),
+                height: new MinMax(2),
+                rocks_per: new MinMax(5),
+                rock_radius: new MinMax(.5, 1.5),
+                ships: mkships({
+                    yellow: {bore: 2},
+                    blue: {swarm: 1},
+                }),
+            }), {corridor2: 2}),
     });
 
     var startNodeName = getParam('start_node');
