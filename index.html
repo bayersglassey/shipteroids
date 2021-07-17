@@ -8,14 +8,10 @@ body {
 }
 .canvas {
     border: solid 1px #0f0;
-    display: inline;
-}
-.canvas-container {
-    width: 100%;
-    text-align: center;
+    display: inline; /* So we can center it with text-align: center */
 }
 .controls {
-    width: 100%;
+    width: 22em;
     text-align: center;
 }
 .controls-table {
@@ -24,14 +20,11 @@ body {
 </style>
 </head>
 <body>
+<table>
+<tr>
+<td>
 <div class="controls">
-    <h2>&#x25BC; SCROLL DOWN TO SEE CONTROLS &#x25BC;</h2>
-</div>
-<div class="canvas-container">
-    <canvas id="canvas" class="canvas" width=700 height=700 tabindex=-1></canvas>
-</div>
-<div class="controls">
-    <h2>&#x25BC; SCROLL DOWN TO SEE CONTROLS &#x25BC;</h2>
+    <h2>&#x25BC; CONTROLS &#x25BC;</h2>
     <table class="controls-table">
         <tr><td><b>Left / right</b></td><td>Turn left / right</td></tr>
         <tr><td><b>Up / down</b></td><td>Thrust / reverse</td></tr>
@@ -39,8 +32,17 @@ body {
         <tr><td><b>Shift</b></td><td>Fire weapon / use ability #2</td></tr>
         <tr><td><b>W</b></td><td>Attempt to warp to next area</td></tr>
         <tr><td><b>Tab</b></td><td>Hold to view map</td></tr>
-        <tr><td><b>Escape</b></td><td>Open menu</td></tr>
+        <tr><td><b>Escape</b></td><td>Open "Choose Ship" menu</td></tr>
     </table>
+    <br>
+    If the controls don't seem to work, you may need to click on the game area to focus it.
+</div>
+</td>
+<td>
+<canvas id="canvas" class="canvas" width=700 height=700 tabindex=-1></canvas>
+</td>
+</tr>
+</table>
 </div>
 
 <script>
