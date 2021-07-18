@@ -69,6 +69,26 @@ body {
 * (Moles and Suits should know to try and get into/onto a rock, so they
 * target them but don't shoot when targeting a rock.)
 *
+* Pickups which increase weapon power, others which reduce cooldown, etc
+* But what do they do for "abilities"?.. e.g. swarm/scout/etc's "y".
+* Well, swam could get an extra turret. Scout could... go faster. Hmm.
+*
+* Story: you start off with your warp drive broken.
+* You need to fix it by shooting open one of the asteroids, exiting your ship,
+* flying over to the thing you shot out of the asteroid, collecting it,
+* bringing it back to your ship, and fixing the warp drive. (Too much?..)
+* Then, you warp.
+* You meet somebody. You've come to Deep Space, which is like its own country.
+* There are political factions (the different colours of "team").
+* Your ship was originally uncoloured, but the person you meet is from the
+* green faction. They describe the local gov't situation. You join green team.
+* Some people live on asteroids, some on planets.
+* Implement little people running around, little households & towns & cities.
+* You do various jobs, meet various people, eventually change factions &
+* have to come back through areas you had been through before, but this
+* time you're on a different team so it's more difficult (areas which had
+* been full of allies are now full of enemies).
+*
 * TODO:
 *
 * When a Field is populated, we should make sure things don't overlap,
@@ -6076,7 +6096,7 @@ var defaultMap = new function() {
                 fuel_chance: 0,
                 text: new Text('Welcome to space', [
                     'Try out your new ship.',
-                    'Press W to warp to the next area.',
+                    'Once you\'re ready, press W to warp to the next area.',
                     'Try not to hit things while warping.',
                 ]),
             }), {intro1: 1}),
