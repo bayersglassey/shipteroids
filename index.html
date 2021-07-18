@@ -176,8 +176,8 @@ var DEFAULT_ROCKS_PER    = 1 /  300000;
 var DEFAULT_PLANETS_PER  = 1 / 1000000;
 var DEFAULT_SHIPS_PER    = 1 /  500000;
 var DEFAULT_STAR_SPEED = 3;
-var DEFAULT_ENERGY_CHANCE = .05;
-var DEFAULT_FUEL_CHANCE = .1;
+var DEFAULT_ENERGY_CHANCE = .08;
+var DEFAULT_FUEL_CHANCE = .12;
 var DEFAULT_GOLD_CHANCE = .5;
 
 // keyCode values
@@ -2589,6 +2589,7 @@ class Entity extends Sprite {
     finishWarp() {
         var player = this.getPlayer();
         player.useFuel(WARP_FUEL);
+        player.shipHp = this.hp;
 
         var progress = this.field.game.progress;
         if(progress.canProceed()) {
@@ -2598,8 +2599,6 @@ class Entity extends Sprite {
         } else {
             // Pop up a menu, so player can choose where to warp to next
             this.field.game.setMenu(WarpMapMenu);
-            var player = this.getPlayer();
-            player.shipHp = this.hp;
             this.die();
         }
     }
@@ -3165,7 +3164,7 @@ class Game {
             var text = this.progress.template.text;
             if(text && !HIDE_TEXT) text.render(canvas);
         }
-        if(this.camera.target) this.renderEntityStats(this.camera.target);
+        this.renderPlayerStats(this.players[0]);
     }
     renderTextPictures(text, writer, x0, y0, letterWidth, letterHeight, padWidth, padHeight, render_opts) {
         writer = getDefault(writer, blockyWriter);
@@ -3199,7 +3198,7 @@ class Game {
             x += letterWidth + padWidth;
         }
     }
-    renderEntityStats(entity) {
+    renderPlayerStats(player) {
         var canvas = this.canvas;
         var ctx = canvas.getContext('2d');
 
@@ -3244,28 +3243,28 @@ class Game {
         var parseAmount = amount =>
             parseInt(amount).toString().padStart(3, ' ');
 
-        renderText('E', ENERGY_COLOR);
-        var text = ': ' + parseAmount(entity.hp)
-            + ' / ' + parseAmount(entity.maxhp);
-        if(entity.rock) {
-            var rock = entity.rock;
-            text += ' [' + parseAmount(rock.hp)
-                + ' / ' + parseAmount(rock.maxhp) + ']';
+        var entity = player.entity;
+        if(entity) {
+            renderText('E', ENERGY_COLOR);
+            var text = ': ' + parseAmount(entity.hp)
+                + ' / ' + parseAmount(entity.maxhp);
+            if(entity.rock) {
+                var rock = entity.rock;
+                text += ' [' + parseAmount(rock.hp)
+                    + ' / ' + parseAmount(rock.maxhp) + ']';
+            }
+            renderText(text);
         }
-        renderText(text);
         newline();
 
-        var player = entity.getPlayer();
-        if(player) {
-            renderText('F', FUEL_COLOR);
-            renderText(': ' + parseAmount(player.fuel)
-                + ' / ' + parseAmount(player.maxfuel));
-            newline();
+        renderText('F', FUEL_COLOR);
+        renderText(': ' + parseAmount(player.fuel)
+            + ' / ' + parseAmount(player.maxfuel));
+        newline();
 
-            renderText('G', GOLD_COLOR);
-            renderText(': ' + parseAmount(player.gold));
-            newline();
-        }
+        renderText('G', GOLD_COLOR);
+        renderText(': ' + parseAmount(player.gold));
+        newline();
     }
     renderTitle(title, subtitles) {
         var canvas = this.canvas;
@@ -3986,8 +3985,12 @@ class ScoutShip extends Ship {
     }
     stepCPUKey(key) {
         if(key.name === 'y') {
-            if(Math.random() < .05) key.down();
-            if(Math.random() < .05) key.up();
+            // Don't switch between wings in/out too often
+            if(key.isDown) {
+                if(Math.random() < .05) key.up();
+            } else {
+                if(Math.random() < .05) key.down();
+            }
         } else {
             super.stepCPUKey(key);
         }
@@ -4295,7 +4298,7 @@ class HunterShip extends Ship {
                 if(Math.random() < .05) key.up();
             } else {
                 // Don't cloak too often
-                if(Math.random() < .05) key.down();
+                if(Math.random() < .01) key.down();
             }
         } else {
             super.stepCPUKey(key);
@@ -4969,7 +4972,7 @@ class CrabShip extends Ship {
 
     addhp = DEFAULT_ADDHP * 4;
 
-    static maxhp = 250;
+    static maxhp = 200;
 
     shotClass = {
         x: ChompShot,
@@ -5116,7 +5119,7 @@ class SwarmShip extends HasTurretsShip {
     circleLineWidth = 3;
 
     max_turret_cooldown = 25;
-    max_turrets = 5;
+    max_turrets = 3;
     turret_class = SwarmTurretShip;
 
     initSwarmShip = _initSwarmShip;
