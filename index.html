@@ -166,6 +166,7 @@ var WARP_COLLISION_DAMAGE = 10;
 var WARP_FUEL = 10;
 var MIN_NODE_RADIUS = 5;
 var MAX_NODE_RADIUS = 20;
+var MAX_SHOTPROPS_LEVEL = 3;
 
 // Game/field default options
 var DEFAULT_FIELD_WIDTH  = 1000;
@@ -2058,6 +2059,19 @@ class Key {
     }
 }
 
+class Shotprops {
+    /* The "properties" of an Entity's shots for a given keyname,
+    e.g. 'x' or 'y'. */
+
+    cooldown = 0; // how long till another shot can be fired
+    n_shots = 0; // how many shots have been fired
+    level = 0; // as level increases, weapon is more powerful
+
+    step() {
+        if(this.cooldown > 0) this.cooldown--;
+    }
+}
+
 class Entity extends Sprite {
     /* An Entity is a sprite with "volition" -- it has virtual keys which
     can be pressed, and based on their state, it can move itself. */
@@ -2118,10 +2132,7 @@ class Entity extends Sprite {
 
         this.shotprops = {};
         for(var keyname in this.shotClass) {
-            this.shotprops[keyname] = {
-                cooldown: 0,
-                n_shots: 0,
-            };
+            this.shotprops[keyname] = new Shotprops();
         };
 
         this.keys = Key.createKeys();
@@ -2215,7 +2226,7 @@ class Entity extends Sprite {
     step() {
         for(var keyname in this.shotClass) {
             var shotprops = this.shotprops[keyname];
-            if(shotprops.cooldown > 0) shotprops.cooldown--;
+            shotprops.step();
         }
 
         if(this.thrustEffectCooldown > 0) this.thrustEffectCooldown--;
@@ -2397,7 +2408,7 @@ class Entity extends Sprite {
 
         var serial_i = shotprops.n_shots % cls.serialShots;
         for(var i = 0; i < cls.initialShots; i++) {
-            var shot = this.shoot(cls, i, serial_i);
+            var shot = this.shoot(cls, i, serial_i, shotprops);
             this.afterShot(shot);
         }
 
@@ -2414,37 +2425,38 @@ class Entity extends Sprite {
         // Subclasses may add special behaviour...
         shot.afterShotBy(this);
     }
-    shoot(cls, shot_i, serial_shot_i) {
+    shoot(cls, shot_i, serial_shot_i, shotprops) {
         // shot_i: index of this shot. E.g. if 3 are being fired at once,
         // this one might be 0, 1, or 2.
 
         var shot = this.field.addShot(cls);
         shot.ship = this;
         shot.setTeam(this.team);
+        shot.applyPowerup(shotprops.level);
 
         shot.rot = this.rot
             + getRotVariance(shot_i, cls.initialShots)
-                * cls.initialRotVariance
+                * shot.initialRotVariance
             + getRotVariance(serial_shot_i, cls.serialShots)
-                * cls.serialRotVariance
+                * shot.serialRotVariance
             + Random.randNumber(-.5, .5)
-                * cls.randomRotVariance;
+                * shot.randomRotVariance;
 
         var posrot = 0
             + getRotVariance(shot_i, cls.initialShots)
-                * cls.initialPosRotVariance
+                * shot.initialPosRotVariance
             + getRotVariance(serial_shot_i, cls.serialShots)
-                * cls.serialPosRotVariance
+                * shot.serialPosRotVariance
             + Random.randNumber(-.5, .5)
-                * cls.randomPosRotVariance;
+                * shot.randomPosRotVariance;
 
-        var speed = cls.initialSpeed
+        var speed = shot.initialSpeed
             + Random.randNumber(-.5, 5)
-                * cls.randomSpeedVariance;
+                * shot.randomSpeedVariance;
 
         var addpos = this.radius;
 
-        if(cls.isReverseShot) {
+        if(shot.isReverseShot) {
             addpos = -addpos;
             speed = -speed;
         }
@@ -2452,7 +2464,7 @@ class Entity extends Sprite {
         shot.pos.copy(this.pos)
             .addSpeed(addpos, shot.rot + posrot);
         shot.vel.copy(this.vel)
-            .mul(cls.initialVelMul)
+            .mul(shot.initialVelMul)
             .addSpeed(speed, shot.rot);
         return shot;
     }
@@ -2782,6 +2794,18 @@ class Player {
     // max hp.
     addmaxhp = 0;
 
+    // increase(Thrust|Reverse|Rot)Speed: integers which, when increased, add
+    // a small multiplier to ship's thrustSpeed, reverseSpeed, or rotspeed
+    increaseThrustSpeed = 0;
+    increaseReverseSpeed = 0;
+    increaseRotSpeed = 0;
+
+    // (x|y)ShotLevel: integer powerup level for the indicated shot
+    // ('x' or 'y').
+    // Translates into Shotprops.level.
+    xShotLevel = 0;
+    yShotLevel = 0;
+
     maxfuel = DEFAULT_MAXFUEL;
     fuel = DEFAULT_MAXFUEL / 2;
 
@@ -2800,13 +2824,6 @@ class Player {
         this.team = TEAMS.get('green');
         this.keys = Key.createKeys();
         this.gamepad_keys = Key.createKeys();
-    }
-    addMaxHp(hp) {
-        this.addmaxhp += hp;
-        if(this.entity) {
-            this.entity.maxhp += hp;
-            this.entity.hp += hp;
-        }
     }
     addFuel(fuel) {
         this.fuel += fuel;
@@ -2850,10 +2867,27 @@ class Player {
         var ship = this.game.addShip(cls);
         ship.pos.setRandomWithin(this.game.field.size);
         ship.rot = Random.randRotation();
+        this.setEntity(ship);
+        this.addShipBuffs(ship);
+        return ship;
+    }
+    addShipBuffs(ship) {
+        // Tweak ship's properties based on items player has bought
+
         ship.maxhp += this.addmaxhp;
         ship.hp += this.addmaxhp;
-        this.setEntity(ship);
-        return ship;
+
+        ship.thrustSpeed *= (1 + .65 * this.increaseThrustSpeed);
+        ship.reverseSpeed *= (1 + .65 * this.increaseReverseSpeed);
+        ship.rotspeed *= (1 + .2 * this.increaseRotSpeed);
+
+        for(var keyname of 'xy') {
+            ship.shotprops[keyname].level += this[keyname + 'ShotLevel'];
+        }
+
+        // Allow ship to tweak itself based on the buffs, in particular
+        // Shotprops.level.
+        ship.afterAddShipBuffs();
     }
     reviveShip() {
         // "Revive" the ship "killed" when you warped from previous area
@@ -2978,19 +3012,30 @@ class Game {
     warp() {
         /* Warp to the next Field */
 
-        var targetPlayer = null;
-        if(this.camera.target) targetPlayer = this.camera.target.getPlayer();
-
         this.camera.unsetTarget();
 
         this.field.cleanup();
         this._createField();
 
+        if(this.field.shop) {
+            this.setMenu(ShopMenu);
+            // Do *NOT* "revive" players until they are done shopping!..
+            // ShopMenu will handle that when it is closed.
+            // That way, players' ships are created with the proper upgrades.
+        } else {
+            this.revivePlayers();
+        }
+    }
+    revivePlayers() {
+        // "Revive" (create) players' ships after warping.
+
         for(var player of this.players) player.reviveShip();
 
-        if(targetPlayer) this.camera.setTarget(targetPlayer.entity);
-
-        if(this.field.shop) this.setMenu(ShopMenu);
+        // HACK: we assume first player is who camera should be targeting.
+        // The reason we have to do this is that finishWarp currently kills
+        // the ship, so game.camera.target gets set to null, so game.warp()
+        // has no way to know what the camera should be pointed at.
+        this.camera.setTarget(this.players[0].entity);
     }
     onKeyDown(event) {
         if(!event.repeat) this.keyDown(event.keyCode);
@@ -3398,6 +3443,22 @@ class ShopMenu extends Menu {
     finish() {
         // That is, "leave the shop"
         this.game.unsetMenu();
+
+        if(!this.game.players[0].shipClass) {
+            // HACK: if player hasn't chosen a ship yet, let them do so now.
+            // This is just so that you can start the game at a shop node,
+            // allowing you to buy upgrades first, *then* pick a ship (and
+            // have the upgrades correctly applied to the ships created by
+            // ChooseShipMenu).
+            // (It's also a hack that we assume there is only one player.)
+            this.game.setMenu(ChooseShipMenu);
+        } else {
+            // When warping to an area with a shop, ShopMenu is opened and
+            // players are *not* revived.
+            // Now that we are closing ShopMenu, we revive the players.
+            // Their ships will be created with any upgrades they bought.
+            this.game.revivePlayers();
+        }
     }
 }
 
@@ -3678,12 +3739,6 @@ class WarpMapMenu extends MapMenu {
             this.game.unsetMenu();
 
             this.game.warp();
-
-            // HACK: we assume first player is who camera should be targeting.
-            // The reason we have to do this is that finishWarp currently kills
-            // the ship, so game.camera.target gets set to null, so game.warp()
-            // has no way to know what the camera should be pointed at.
-            this.game.camera.setTarget(this.game.players[0].entity);
         } else {
             super.keyDown(keyCode);
         }
@@ -3796,6 +3851,13 @@ class Ship extends Entity {
     canPickup(pickup) {
         // Can be overridden by subclasses
         return true;
+    }
+    afterAddShipBuffs() {
+        // Called after our properties have been tweaked by
+        // Player.addShipBuffs.
+        // In particular, this would be a good time to update any of
+        // our properties based on Shotprops.level.
+        // To be overridden by subclasses.
     }
     dieFromDamage() {
         if(
@@ -4201,6 +4263,11 @@ class HunterShip extends Ship {
         if(shotprops.cooldown === 0 && !this.is_warping) {
             var cloaked = this.keys[keyname].wasDown;
             if(cloaked != this.cloaked) {
+                if(cloaked) {
+                    var cloakdamage = 2
+                        * (1 - this.shotprops.y.level / MAX_SHOTPROPS_LEVEL);
+                    this.damage(cloakdamage);
+                }
                 this.cloaked = cloaked;
                 this.updateThrustEffects();
                 this.emitEffects(SmokeEffect, 4, {
@@ -4282,6 +4349,12 @@ class HasTurretsShip extends Ship {
             .addSpeed(this.radius + turret.radius, this.rot);
         turret.vel.copy(this.vel);
         turret.flagship = this;
+
+        var player = this.getPlayer();
+        if(player) {
+            // Turret gets the same "buffs" from player's items as flagship
+            player.addShipBuffs(turret);
+        }
 
         this.turrets.push(turret);
         this.turret_cooldown = this.max_turret_cooldown;
@@ -4471,7 +4544,8 @@ class MoleShip extends Ship {
             rock.rot_vel *= .95;
             rock.vel.mul(this.velmul);
 
-            rock.heal(1 / 20);
+            var addhp = (1 / 20) * (1 + .75 * this.shotprops.y.level);
+            rock.heal(addhp);
         }
         super.step();
     }
@@ -4749,6 +4823,11 @@ class MinerShip extends SuitShip {
         Shape.newPolygon(4, {rot: Math.PI / 4}).mulxy(.6, .3).addxy(-1,  .6),
     ]);
 
+    afterAddShipBuffs() {
+        super.afterAddShipBuffs();
+
+        this.dig_cooldown -= 15 * this.shotprops.y.level;
+    }
     fire(keyname) {
         if(keyname === 'y' && this.rock && this.canDig(this.rock)) {
             this.dig(this.rock);
@@ -4952,15 +5031,17 @@ class CrabShip extends Ship {
     }
     fire(keyname) {
         if(keyname === 'y') {
-            this.thrust(this.chomp_thrust, this.rot, {cls: null});
-            this.addThrustEffects(2, this.rot + Math.PI, {
+            var shotprops = this.shotprops[keyname];
+
+            var speed = this.chomp_thrust * (1 + .4 * shotprops.level);
+            this.thrust(speed, this.rot, {cls: null});
+            this.addThrustEffects(2 + shotprops.level, this.rot + Math.PI, {
                 cls: FlameSmokeEffect,
                 n_effects: 3,
                 velmul: 0,
                 posrot: Math.PI / 2,
             });
 
-            var shotprops = this.shotprops[keyname];
             shotprops.cooldown += this.chomp_cooldown;
         } else {
             super.fire(keyname);
@@ -5043,6 +5124,12 @@ class SwarmShip extends HasTurretsShip {
     constructor(field) {
         super(field);
         this.initSwarmShip(true);
+    }
+    afterAddShipBuffs() {
+        super.afterAddShipBuffs();
+
+        // Upgrades to our 'y' shot translate into more turrets.
+        this.max_turrets += this.shotprops.y.level;
     }
     step() {
         var tightFormation = this.keys.y.isDown;
@@ -5136,18 +5223,18 @@ class Shot extends Entity {
     static serialShots = 1;
     // "rot variance": difference in radians between the rot of first
     // and last Shot instance produced by firing this Shot type
-    static initialRotVariance = 0;
-    static serialRotVariance = 0;
-    static randomRotVariance = 0;
-    static initialPosRotVariance = 0;
-    static serialPosRotVariance = 0;
-    static randomPosRotVariance = 0;
+    initialRotVariance = 0;
+    serialRotVariance = 0;
+    randomRotVariance = 0;
+    initialPosRotVariance = 0;
+    serialPosRotVariance = 0;
+    randomPosRotVariance = 0;
 
-    static isReverseShot = false;
+    isReverseShot = false;
 
-    static initialSpeed = 20;
-    static initialVelMul = 1;
-    static randomSpeedVariance = 0;
+    initialSpeed = 20;
+    initialVelMul = 1;
+    randomSpeedVariance = 0;
 
     // Making player's gamepad rumble when they shoot
     static vibrateDuration = 0;
@@ -5176,6 +5263,15 @@ class Shot extends Entity {
         // The Ship who shot us out
         this.ship = null;
     }
+    applyPowerup(level) {
+        // This is called by the Entity which fired this Shot, to apply
+        // any powerups it may have had.
+        level = getDefault(level, 0);
+
+        this.radius += Math.ceil(this.radius * .075) * level;
+        this.hitDamage += Math.ceil(this.hitDamage / 4) * level;
+        this.initialSpeed += Math.ceil(this.initialSpeed / 4) * level;
+    }
     afterShotBy(entity) {
         // Bit of a hack, called by Entity.shoot, Entity.emitShots, etc.
         // Just lets subclasses of Shot customize themselves a bit based
@@ -5201,7 +5297,7 @@ class Shot extends Entity {
 class SingleShot extends Shot {
     radius = 3 * RADIUSMUL;
     velmul = .95;
-    static initialSpeed = 23;
+    initialSpeed = 23;
     hitDamage = 10;
     hitDamageAgeMul = .95;
     shouldRenderTrail = true;
@@ -5211,12 +5307,12 @@ class SingleShot extends Shot {
 }
 
 class ShortSingleShot extends SingleShot {
-    static initialSpeed = 17;
+    initialSpeed = 17;
     static cooldown = 3;
 }
 
 class SlowSingleShot extends SingleShot {
-    static initialSpeed = 17;
+    initialSpeed = 17;
     static cooldown = 5;
 }
 
@@ -5227,7 +5323,7 @@ class BoldSlowSingleShot extends SlowSingleShot {
 
 class RapidSingleShot extends SingleShot {
     radius = 4 * RADIUSMUL;
-    static initialSpeed = 26;
+    initialSpeed = 26;
     hitDamage = 6;
     hitDamageAgeMul = .98;
     static cooldown = 2;
@@ -5238,39 +5334,39 @@ class RapidSingleShot extends SingleShot {
 
 class RapidDoubleShot extends RapidSingleShot {
     static serialShots = 2;
-    static serialPosRotVariance = Math.PI / 2;
+    serialPosRotVariance = Math.PI / 2;
 }
 
 class DoubleShot extends SingleShot {
     static serialShots = 2;
-    static serialRotVariance = Math.PI / 18;
+    serialRotVariance = Math.PI / 18;
 }
 
 class ShortDoubleShot extends ShortSingleShot {
     static serialShots = 2;
-    static serialRotVariance = Math.PI / 26;
-    static serialPosRotVariance = Math.PI / 3;
+    serialRotVariance = Math.PI / 26;
+    serialPosRotVariance = Math.PI / 3;
 }
 
 class TripleShot extends SingleShot {
     static initialShots = 3;
     static serialShots = 1;
-    static initialRotVariance = Math.PI / 13;
-    static serialRotVariance = 0;
+    initialRotVariance = Math.PI / 13;
+    serialRotVariance = 0;
     static cooldown = 7;
 }
 
 class QuadrupleShot extends SingleShot {
     static serialShots = 4;
-    static serialRotVariance = Math.PI / 20;
-    static serialPosRotVariance = Math.PI;
+    serialRotVariance = Math.PI / 20;
+    serialPosRotVariance = Math.PI;
     static cooldown = 2;
 }
 
 class MiniBlasterShot extends Shot {
     radius = 4 * RADIUSMUL;
-    static initialSpeed = 18;
-    static initialVelMul = 1;
+    initialSpeed = 18;
+    initialVelMul = 1;
     velmul = 1;
 
     hitVelMul = .05;
@@ -5301,14 +5397,14 @@ class MiniBlasterShot extends Shot {
 
 class DoubleMiniBlasterShot extends MiniBlasterShot {
     static serialShots = 2;
-    static serialRotVariance = Math.PI / 26;
-    static serialPosRotVariance = Math.PI / 3;
+    serialRotVariance = Math.PI / 26;
+    serialPosRotVariance = Math.PI / 3;
 }
 
 class BlasterShot extends Shot {
     radius = 10 * RADIUSMUL;
-    static initialSpeed = 14;
-    static initialVelMul = .7;
+    initialSpeed = 14;
+    initialVelMul = .7;
     velmul = 1;
 
     hitVelMul = .5;
@@ -5340,8 +5436,8 @@ class BlasterShot extends Shot {
 
 class MissileShot extends Shot {
     radius = 6 * RADIUSMUL;
-    static initialSpeed = 10;
-    static initialVelMul = .6;
+    initialSpeed = 10;
+    initialVelMul = .6;
     velmul = .9;
 
     thrustSpeed = 3;
@@ -5393,24 +5489,24 @@ class MissileShot extends Shot {
 
 class DoubleMissileShot extends MissileShot {
     static initialShots = 2;
-    static initialRotVariance = Math.PI / 9;
-    static initialPosRotVariance = Math.PI / 3;
+    initialRotVariance = Math.PI / 9;
+    initialPosRotVariance = Math.PI / 3;
 }
 
 class QuadrupleMissileShot extends MissileShot {
     static serialShots = 4;
-    static serialRotVariance = Math.PI / 4;
-    static serialPosRotVariance = Math.PI;
+    serialRotVariance = Math.PI / 4;
+    serialPosRotVariance = Math.PI;
     static cooldown = 8;
 }
 
 class FlameShot extends Shot {
-    static randomRotVariance = Math.PI / 40;
-    static randomPosRotVariance = Math.PI / 8;
-    static randomSpeedVariance = 1.5;
+    randomRotVariance = Math.PI / 40;
+    randomPosRotVariance = Math.PI / 8;
+    randomSpeedVariance = 1.5;
 
-    static initialSpeed = 10;
-    static initialVelMul = .8;
+    initialSpeed = 10;
+    initialVelMul = .8;
 
     hitVelMul = 0;
     hitDamage = 3;
@@ -5441,15 +5537,15 @@ class FlameShot extends Shot {
 }
 
 class DoubleFlameShot extends FlameShot {
-    static randomRotVariance = Math.PI / 20;
-    static randomPosRotVariance = Math.PI / 4;
+    randomRotVariance = Math.PI / 20;
+    randomPosRotVariance = Math.PI / 4;
 
     static initialShots = 2;
-    static initialRotVariance = Math.PI / 9;
+    initialRotVariance = Math.PI / 9;
 }
 
 class ReverseFlameShot extends FlameShot {
-    static isReverseShot = true;
+    isReverseShot = true;
 
     hitDamage = 2;
     static cooldown = 2;
@@ -5463,7 +5559,7 @@ class RamFlameShot extends ReverseFlameShot {
 
 class MineShot extends Shot {
     radius = 6 * RADIUSMUL;
-    static initialSpeed = 0;
+    initialSpeed = 0;
     velmul = .9;
 
     hitDamage = 8;
@@ -5489,8 +5585,8 @@ class MineShot extends Shot {
 
 class ChompShot extends Shot {
     radius = 10 * RADIUSMUL;
-    static initialSpeed = 24;
-    static initialVelMul = 1;
+    initialSpeed = 24;
+    initialVelMul = 1;
     velmul = .9;
 
     hitVelMul = .325;
@@ -5525,8 +5621,8 @@ class ChompShot extends Shot {
 
 class ToolShot extends Shot {
     radius = 4 * RADIUSMUL;
-    static initialSpeed = 12;
-    static initialVelMul = .8;
+    initialSpeed = 12;
+    initialVelMul = .8;
     velmul = .95;
 
     hitVelMul = .25;
@@ -5549,8 +5645,8 @@ class ToolShot extends Shot {
 
 class RopeShot extends Shot {
     radius = 4 * RADIUSMUL;
-    static initialSpeed = 32;
-    static initialVelMul = .8;
+    initialSpeed = 32;
+    initialVelMul = .8;
     velmul = .99;
 
     hitVelMul = .45;
@@ -5717,8 +5813,8 @@ class RopeShot extends Shot {
 
 class BoreShot extends Shot {
     radius = 6 * RADIUSMUL;
-    static initialSpeed = 16;
-    static initialVelMul = .9;
+    initialSpeed = 16;
+    initialVelMul = .9;
     velmul = .965;
 
     hitVelMul = .5;
@@ -5940,7 +6036,7 @@ class MaxEnergyShopItem extends ShopItem {
     }
     buy(player) {
         super.buy(player);
-        player.addMaxHp(this.energy);
+        player.addmaxhp += this.energy;
     }
 }
 
@@ -5956,7 +6052,55 @@ class MaxFuelShopItem extends ShopItem {
     buy(player) {
         super.buy(player);
         player.maxfuel += this.fuel;
+        player.fuel += this.fuel;
     }
+}
+
+class SpeedShopItem extends ShopItem {
+    name = 'Increase Thrust & Turn Speed';
+    price = 40;
+    description = 'Permanently increases your ship\'s forward/reverse thrust and turning speed.';
+
+    buy(player) {
+        super.buy(player);
+        player.increaseThrustSpeed++;
+        player.increaseReverseSpeed++;
+        player.increaseRotSpeed++;
+    }
+}
+
+class BasePowerupShopItem extends ShopItem {
+    name = 'Weapon/Ability Powerup';
+    price = 50;
+    description = 'Permanently powers up your ship\'s weapon/ability.';
+
+    keyname = null; // String, e.g. 'x', 'y'
+
+    cantBuy(player) {
+        var value = super.cantBuy(player);
+        if(value) return value;
+
+        if(player[this.keyname + 'ShotLevel'] >= MAX_SHOTPROPS_LEVEL) {
+            return 'Already fully powered up';
+        }
+        return null;
+    }
+    buy(player) {
+        super.buy(player);
+        player[this.keyname + 'ShotLevel']++;
+    }
+}
+
+class PrimaryPowerupShopItem extends BasePowerupShopItem {
+    name = 'Primary Weapon/Ability Powerup';
+    description = 'Permanently powers up your ship\'s primary weapon/ability.';
+    keyname = 'x';
+}
+
+class SecondaryPowerupShopItem extends BasePowerupShopItem {
+    name = 'Secondary Weapon/Ability Powerup';
+    description = 'Permanently powers up your ship\'s secondary weapon/ability.';
+    keyname = 'y';
 }
 
 class ShipShopItem extends ShopItem {
@@ -6279,6 +6423,8 @@ var defaultMap = new function() {
                         new MaxEnergyShopItem(40),
                         new MaxFuelShopItem(20),
                         new MaxFuelShopItem(20),
+                        new PrimaryPowerupShopItem(),
+                        new SecondaryPowerupShopItem(),
                         new ShipShopItem(TorchShip, 40),
                         new ShipShopItem(RamShip, 40),
                         new ShipShopItem(CrabShip, 40),
@@ -6316,7 +6462,20 @@ var defaultMap = new function() {
                     blue: {assault: 1, hunter: .5},
                     red: {crab: 1, hunter: .5},
                 }),
-            }), {corridor2: 4}),
+            }), {corridor2: 4, corridor_shop: 1}),
+        corridor_shop: defnode('Corridor', [],
+            mktemplate({
+                shop: new Shop('Secret Shop', [],
+                    [
+                        new MaxEnergyShopItem(20),
+                        new MaxFuelShopItem(30),
+                        new PrimaryPowerupShopItem(),
+                        new PrimaryPowerupShopItem(),
+                        new SecondaryPowerupShopItem(),
+                        new SecondaryPowerupShopItem(),
+                        new SpeedShopItem(),
+                    ]),
+            }), {corridor1: 1}),
         corridor2: defnode('Corridor', [],
             mktemplate({
                 width: new MinMax(2, 3),
@@ -6441,7 +6600,7 @@ game.mapKey(player.keys.x, KEY_SPACE);
 game.mapKey(player.keys.y, KEY_SHIFT);
 
 if(game.field.shop) game.setMenu(ShopMenu);
-game.setMenu(ChooseShipMenu);
+else game.setMenu(ChooseShipMenu);
 
 game.play();
 canvas.style.border = 'none';
