@@ -25,6 +25,7 @@ The language is Javascript (ES6) and HTML5 (canvas etc).
 
 ![](/img/screen-title2.png)
 ![](/img/screen1.png)
+![](/img/screen8.png)
 ![](/img/screen4.png)
 ![](/img/screen5.png)
 ![](/img/screen6.png)
