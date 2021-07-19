@@ -91,6 +91,10 @@ body {
 *
 * TODO:
 *
+* Saving/loading
+*
+* Multiplayer
+*
 * When a Field is populated, we should make sure things don't overlap,
 * otherwise everything will start immediately rocketing around the screen.
 *
@@ -178,7 +182,7 @@ var DEFAULT_SHIPS_PER    = 1 /  500000;
 var DEFAULT_STAR_SPEED = 3;
 var DEFAULT_ENERGY_CHANCE = .08;
 var DEFAULT_FUEL_CHANCE = .12;
-var DEFAULT_GOLD_CHANCE = .5;
+var DEFAULT_GOLD_CHANCE = 1;
 
 // keyCode values
 var KEY_U = 38;
@@ -1543,6 +1547,12 @@ class FieldParticle extends Particle {
         this.field = field;
         this.modulo = field.size;
     }
+    dist(other) {
+        return this.pos.dist(other.pos, this.field.size);
+    }
+    angle(other) {
+        return this.pos.angle(other.pos, this.field.size);
+    }
     stepPhysics() {
         // Make sure we don't go too gast
         var maxspeed = MAXSPEED;
@@ -1963,16 +1973,19 @@ class Sprite extends FieldParticle {
 
         for(var addx = addx0; addx <= addx0 + fieldx; addx += fieldx) {
             for(var addy = addy0; addy <= addy0 + fieldy; addy += fieldy) {
-                if(this.shouldRenderTrail) {
-                    this.renderTrail(canvas, camera, addx, addy);
-                }
-                if(this.shouldRenderCircle || RENDER_CIRCLES) {
-                    this.renderCircle(canvas, camera, addx, addy);
-                }
-                if(this.picture) {
-                    this.renderPicture(canvas, camera, addx, addy);
-                }
+                this._render(canvas, camera, addx, addy);
             }
+        }
+    }
+    _render(canvas, camera, addx, addy) {
+        if(this.shouldRenderTrail) {
+            this.renderTrail(canvas, camera, addx, addy);
+        }
+        if(this.shouldRenderCircle || RENDER_CIRCLES) {
+            this.renderCircle(canvas, camera, addx, addy);
+        }
+        if(this.picture) {
+            this.renderPicture(canvas, camera, addx, addy);
         }
     }
     renderPicture(canvas, camera, addx, addy) {
@@ -2005,6 +2018,33 @@ class Sprite extends FieldParticle {
         ctx.lineWidth = this.circleLineWidth;
         ctx.fillStyle = this.circleFillStyle;
         renderCircle(ctx, x0, y0, this.rot, this.radius);
+    }
+    renderLineTo(canvas, camera, addx, addy, other, strokeStyle, lineWidth, alpha) {
+        strokeStyle = getDefault(strokeStyle, 'rgb(255,255,255)');
+        lineWidth = getDefault(lineWidth, 1);
+        alpha = getDefault(alpha, 1);
+
+        var ctx = canvas.getContext('2d');
+        ctx.strokeStyle = strokeStyle;
+        ctx.lineWidth = lineWidth;
+
+        var fieldx = this.field.size.x;
+        var fieldy = this.field.size.y;
+        var x0 = this.pos.x + addx;
+        var y0 = this.pos.y + addy;
+
+        var dx = moduloDiff(this.pos.x, other.pos.x, fieldx);
+        var dy = moduloDiff(this.pos.y, other.pos.y, fieldy);
+        var x1 = x0 + dx;
+        var y1 = y0 + dy;
+
+        ctx.globalAlpha = alpha;
+        ctx.beginPath();
+        ctx.moveTo(x0, y0);
+        ctx.lineTo(x1, y1);
+        ctx.closePath();
+        ctx.stroke();
+        ctx.globalAlpha = 1;
     }
 }
 
@@ -2145,8 +2185,13 @@ class Entity extends Sprite {
         // so they know they should stop referencing it
         this.removed = false;
     }
-    getPlayer() {
+    getPlayer(includeCPUs) {
+        includeCPUs = getDefault(includeCPUs, false);
+
         for(var player of this.field.game.players) {
+            if(player.entity === this) return player;
+        }
+        if(includeCPUs) for(var player of this.field.game.cpus) {
             if(player.entity === this) return player;
         }
         return null;
@@ -2177,7 +2222,7 @@ class Entity extends Sprite {
     heal(addhp) {
         if((this.hp += addhp) > this.maxhp) this.hp = this.maxhp;
     }
-    damage(hp) {
+    damage(hp, other) {
         // hp < 0: this thing is invincible
         if(this.hp < 0) return;
 
@@ -2187,8 +2232,18 @@ class Entity extends Sprite {
         // being generated when this is a Rock)
         if(this.hp === 0) return;
 
+        // IF WE GOT THIS FAR, WE ARE ACTUALLY TAKING DAMAGE
+
         var m = Math.min(hp / 35, 1);
         this.vibrate(Math.max(1000 * m, 200), m, m/4);
+
+        // Let our player know we took some damage
+        var player = this.getPlayer(true);
+        if(player) {
+            var otherShip = other instanceof Ship? other:
+                other instanceof Shot? other.ship: null;
+            if(otherShip) player.tookDamage(otherShip);
+        }
 
         if(this instanceof Ship && NODAMAGE) return;
 
@@ -2493,12 +2548,12 @@ class Entity extends Sprite {
             // we're touching other...
             other.die();
 
-            this.emitEffects(SmokeEffect, 4, {
+            other.emitEffects(SmokeEffect, 4, {
                 speed_min: 3,
                 speed_max: 6,
                 velmul: .65,
             });
-            this.emitEffects(SparkEffect, 4, {
+            other.emitEffects(SparkEffect, 4, {
                 speed_min: 3,
                 speed_max: 6,
                 velmul: .65,
@@ -2616,6 +2671,11 @@ class Entity extends Sprite {
         ctx.globalAlpha = fade;
         super.render(canvas, camera);
         ctx.globalAlpha = 1;
+    }
+    _render(canvas, camera, addx, addy) {
+        super._render(canvas, camera, addx, addy);
+        var player = this.getPlayer(true);
+        if(player) player.renderEntity(canvas, camera, addx, addy);
     }
     renderCircle(canvas, camera, addx, addy) {
         super.renderCircle(canvas, camera, addx, addy);
@@ -2777,7 +2837,60 @@ class Trinket {
     }
 }
 
-class Player {
+class BasePlayer {
+    /* Base class for human and CPU players */
+
+    constructor(game) {
+        this.game = game;
+        this.entity = null;
+        this.team = TEAMS.get('green');
+        this.keys = Key.createKeys();
+    }
+    setTeam(team) {
+        this.team = team;
+        if(this.entity) this.entity.setTeam(team);
+    }
+    setEntity(entity) {
+        this.unsetEntity();
+        this.entity = entity;
+        entity.setTeam(this.team);
+    }
+    unsetEntity() {
+        if(!this.entity) return;
+        this.entity = null;
+    }
+    createShip(cls) {
+        cls = cls || this.shipClass;
+        this.shipClass = cls;
+
+        var ship = this.game.addShip(cls);
+        ship.pos.setRandomWithin(this.game.field.size);
+        ship.rot = Random.randRotation();
+        this.setEntity(ship);
+        return ship;
+    }
+    step() {
+        if(!this.entity) return;
+
+        for(var keyname of Key.KEYNAMES) {
+            var key = this.keys[keyname];
+            this.entity.keys[keyname].copy(key);
+            key.step();
+        }
+    }
+    renderEntity(canvas, camera, addx, addy) {
+        // Render any extra stuff around our entity (who has just been
+        // rendered).
+        // (To be overridden by subclasses)
+    }
+    tookDamage(other) {
+        // What do we do when our entity takes damage from another?
+        // (To be overridden by subclasses)
+    }
+}
+
+class Player extends BasePlayer {
+    /* A human player */
 
     // trinkets: Array of Trinket
     trinkets = [];
@@ -2818,10 +2931,7 @@ class Player {
     gamepad = null;
 
     constructor(game) {
-        this.game = game;
-        this.entity = null;
-        this.team = TEAMS.get('green');
-        this.keys = Key.createKeys();
+        super(game);
         this.gamepad_keys = Key.createKeys();
     }
     addFuel(fuel) {
@@ -2846,27 +2956,8 @@ class Player {
     beginWarp() {
         this.entity.beginWarp();
     }
-    setTeam(team) {
-        this.team = team;
-        if(this.entity) this.entity.setTeam(team);
-    }
-    setEntity(entity) {
-        this.unsetEntity();
-        this.entity = entity;
-        entity.setTeam(this.team);
-    }
-    unsetEntity() {
-        if(!this.entity) return;
-        this.entity = null;
-    }
     createShip(cls) {
-        cls = cls || this.shipClass;
-        this.shipClass = cls;
-
-        var ship = this.game.addShip(cls);
-        ship.pos.setRandomWithin(this.game.field.size);
-        ship.rot = Random.randRotation();
-        this.setEntity(ship);
+        var ship = super.createShip(cls);
         this.addShipBuffs(ship);
         return ship;
     }
@@ -2895,6 +2986,8 @@ class Player {
         return ship;
     }
     step() {
+        super.step();
+
         if(!this.entity) return;
 
         if(this.fuel < WARP_FUEL) this.addFuel(DEFAULT_ADDFUEL);
@@ -2912,12 +3005,13 @@ class Player {
         }
 
         for(var keyname of Key.KEYNAMES) {
-            var key = this.keys[keyname];
             var gamepad_key = this.gamepad_keys[keyname];
 
-            this.entity.keys[keyname].copy(key).union(gamepad_key);
+            // super.step() has already done:
+            //   this.entity.keys[keyname].copy(this.keys[keyname])
+            // ...now we union the gamepad's keypresses onto that.
 
-            key.step();
+            this.entity.keys[keyname].union(gamepad_key);
             gamepad_key.step();
         }
     }
@@ -2941,12 +3035,39 @@ class Player {
     }
 }
 
-class CPUPlayer extends Player {
+class CPUPlayer extends BasePlayer {
 
+    // The Entity we're currently interested in, or null.
+    target = null;
+
+    // Distance past which we lose interest in our target
+    max_target_dist = 225 * RADIUSMUL;
+
+    getTargetDist() {
+        // Distance between our entity and our target
+        // (Assumes they both exist)
+        return Math.max(0, this.entity.dist(this.target)
+            - this.entity.radius - this.target.radius);
+    }
     step() {
 
+        if(this.entity && this.target) {
+            if(this.target.removed) {
+                this.target = null;
+            } else {
+                var targetDist = this.getTargetDist();
+                if(targetDist > this.max_target_dist) this.target = null;
+            }
+        }
+
         // Press/release keys
-        if(this.entity) {
+        if(this.entity && this.target) {
+            // ...if we have a target, aim for it
+            // (HACK!.. this may not be what all ships want to do.
+            // E.g. SuitShip subclasses attached to rocks...)
+            this.aimForTarget();
+        } else if(this.entity) {
+
             // Entity decides which keys to press/release
             // (Basically so each subclass of Ship can override the default
             // "press random keys" implementation and maybe do something
@@ -2954,11 +3075,46 @@ class CPUPlayer extends Player {
             // TODO: so maybe it's better to implement CPU stuff in CPUPlayer,
             // by switching on entity's shotClasses?..)
             this.entity.stepCPUKeys(this.keys);
+
         } else {
             for(var key of this.keys) key.down();
         }
 
         super.step();
+    }
+    aimForTarget() {
+        this.keys.u.up();
+        this.keys.d.up();
+        this.keys.l.up();
+        this.keys.r.up();
+        this.keys.x.down();
+        this.keys.y.down();
+
+        var dist = this.entity.dist(this.target);
+        var tdist = 30 * RADIUSMUL;
+        if(dist < tdist) this.keys.d.down();
+        if(dist > tdist) this.keys.u.down();
+
+        var angle = this.entity.angle(this.target);
+        var rot_diff = rotDiff(this.entity.rot, angle);
+        if(rot_diff > 0) this.keys.l.down();
+        if(rot_diff < 0) this.keys.r.down();
+    }
+    renderEntity(canvas, camera, addx, addy) {
+        super.renderEntity(canvas, camera, addx, addy);
+
+        if(this.entity && this.target) {
+            var targetDist = this.getTargetDist();
+            var strokeStyle = 'rgba(200,0,200,.5)';
+            var lineWidth = 1;
+            var fade = Math.max(.25, 1 - targetDist / this.max_target_dist);
+            this.entity.renderLineTo(canvas, camera, addx, addy, this.target,
+                strokeStyle, lineWidth, fade);
+        }
+    }
+    tookDamage(other) {
+        super.tookDamage(other);
+        this.target = other;
     }
 }
 
@@ -4048,12 +4204,15 @@ class RamShip extends Ship {
         if(keyName == 'x' && this.isRamming()) return;
         super.fire(keyName);
     }
-    damage(hp) {
+    damage(hp, other) {
+
+        // We take less damage while ramming!
         if(this.isRamming()) {
             var hpmul = 1 - linear(0, .75, this.getRamPercent());
             hp *= hpmul;
         }
-        super.damage(hp);
+
+        super.damage(hp, other);
     }
     step() {
         super.step();
@@ -4107,7 +4266,7 @@ class RamShip extends Ship {
         if(this.isRamming() && !isAlly) {
             var damagemul = this.getRamPercent();
             var damage = this.ramDamage * damagemul;
-            other.damage(damage);
+            other.damage(damage, this);
 
             var hitVelMul = .5;
             other.vel.addMul(this.vel, hitVelMul);
@@ -4320,9 +4479,9 @@ class BaseTurretShip extends Ship {
     canEmitGold() {
         return false;
     }
-    getPlayer() {
-        if(this.flagship) return this.flagship.getPlayer();
-        return super.getPlayer();
+    getPlayer(includeCPUs) {
+        if(this.flagship) return this.flagship.getPlayer(includeCPUs);
+        return super.getPlayer(includeCPUs);
     }
 }
 
@@ -5287,7 +5446,7 @@ class Shot extends Entity {
     hit(other) {
         other.vel.addMul(this.vel, this.hitVelMul);
         other.rot_vel += this.rot_vel * this.hitRotMul;
-        other.damage(this.hitDamage);
+        other.damage(this.hitDamage, this);
         this.emitEffects(this.hitEffectClass, 2, {
             speed_min: 2,
             speed_max: 4,
@@ -5704,7 +5863,7 @@ class RopeShot extends Shot {
         if(this.otherEnd && this.otherEnd.stickTarget === other) return;
 
         other.vel.addMul(this.vel, this.hitVelMul);
-        other.damage(this.hitDamage);
+        other.damage(this.hitDamage, this);
         this.emitEffects(this.hitEffectClass, 2, {
             speed_min: 2,
             speed_max: 4,
@@ -5786,27 +5945,8 @@ class RopeShot extends Shot {
             otherEnd = this.otherEnd;
         }
 
-        var ctx = canvas.getContext('2d');
-        ctx.strokeStyle = strokeStyle;
-        ctx.lineWidth = lineWidth;
-
-        var fieldx = this.field.size.x;
-        var fieldy = this.field.size.y;
-        var x0 = this.pos.x + addx;
-        var y0 = this.pos.y + addy;
-
-        var dx = moduloDiff(this.pos.x, otherEnd.pos.x, fieldx);
-        var dy = moduloDiff(this.pos.y, otherEnd.pos.y, fieldy);
-        var x1 = x0 + dx;
-        var y1 = y0 + dy;
-
-        ctx.globalAlpha = fade;
-        ctx.beginPath();
-        ctx.moveTo(x0, y0);
-        ctx.lineTo(x1, y1);
-        ctx.closePath();
-        ctx.stroke();
-        ctx.globalAlpha = 1;
+        this.renderLineTo(canvas, camera, addx, addy, otherEnd,
+            strokeStyle, lineWidth, fade);
     }
     renderPicture(canvas, camera, addx, addy) {
         this.renderRope(canvas, camera, addx, addy);
@@ -5891,9 +6031,9 @@ class Rock extends Entity {
 
         this.rot_vel = Random.randNumber(-.5, .5) * Math.PI / 40;
     }
-    damage(hp) {
+    damage(hp, other) {
         if(this.mole) hp /= 2;
-        super.damage(hp);
+        super.damage(hp, other);
     }
     remove() {
         if(this.mole) this.mole.exitRock();
