@@ -91,6 +91,26 @@ body {
 *
 * TODO:
 *
+* Fixing current "Choose Ship" menu, where you can always get a free ship
+* at full health, what if we make it so whenever warping into an area,
+* you can choose a ship to use?
+* And each ship has persistent hp, and... maybe separate upgrades?..
+* So if one of your ships "explodes", you actually still have it, but
+* at 0 hp (so you can't warp in with it???) and have to go pay for it
+* to be repaired. And then either pay to get it to full hp, or maybe
+* after repair it has like 10 hp and you need to go farm rocks for hp.
+*
+* Improve "AI"
+* avoidTarget is currently pretty lame, no shooting so easy to hunt
+* them down; better (for most ships) to back away on an angle while shooting.
+* Let's have multiple behaviours of various types, e.g. "default", "fearful",
+* "aggro".
+* Different ship classes use different ones (or perhaps use each with
+* different probabilities).
+* Some ships stay aggro when low hp, or even go "kamikaze". E.g. Assault is
+* bad at running away.
+* Others are super fearful, e.g. mole when not in a rock, maybe Torch?
+*
 * Saving/loading
 *
 * Multiplayer
@@ -566,7 +586,7 @@ class Point {
     rotate(rot) {
         /*
             for(var i = 0; i < 4; i++) {
-                var p = new Point(1).rotate(Math.PI * i / 2); 
+                var p = new Point(1).rotate(Math.PI * i / 2);
                 console.log(p);
             }
             // {x:  1, y:  0}
@@ -2185,6 +2205,13 @@ class Entity extends Sprite {
         // so they know they should stop referencing it
         this.removed = false;
     }
+    getShip() {
+        // Return the ship to which we "belong", e.g. this if this
+        // is a Ship, or the ship which shot this if this is a Shot,
+        // or the mole which is commandeering this if this is a Rock.
+        // (To be overridden by subclasses)
+        return null;
+    }
     getPlayer(includeCPUs) {
         includeCPUs = getDefault(includeCPUs, false);
 
@@ -2238,10 +2265,10 @@ class Entity extends Sprite {
         this.vibrate(Math.max(1000 * m, 200), m, m/4);
 
         // Let our player know we took some damage
-        var player = this.getPlayer(true);
-        if(player) {
-            var otherShip = other instanceof Ship? other:
-                other instanceof Shot? other.ship: null;
+        var ship = this.getShip();
+        var player = ship? ship.getPlayer(true): null;
+        if(player && other) {
+            var otherShip = other.getShip();
             if(otherShip) player.tookDamage(otherShip);
         }
 
@@ -2359,7 +2386,9 @@ class Entity extends Sprite {
         }
     }
     stepCPUKeys(keys) {
-        // Do one step of a CPU player deciding which keys to press/release
+        // Do one step of a CPU player deciding which keys to press/release.
+        // NOTE: This is for use when player is not targeting any particular
+        // entity, i.e. ship is just kind of flying around aimlessly
         // NOTE: keys is player.keys (presumably this.getPlayer().keys)
         for(var keyname in keys) {
             var key = keys[keyname];
@@ -2370,6 +2399,65 @@ class Entity extends Sprite {
         // Handle CPU player's decision of whether to press/release given key
         if(Math.random() < .1) key.down();
         if(Math.random() < .1) key.up();
+    }
+    avoidTarget(target, keys) {
+        // Attempt to avoid target entity
+        // NOTE: keys is player.keys (presumably this.getPlayer().keys)
+
+        keys.u.down();
+        keys.d.up();
+        keys.l.up();
+        keys.r.up();
+        keys.x.up();
+        keys.y.up();
+
+        var angle = this.angle(target);
+        var rot_diff = rotDiff(this.rot, angle) - Math.PI;
+        if(rot_diff > 0) {
+            // target is to our left
+            // Attempt to keep rot_diff at -Math.PI / 2, that is,
+            // keep target 90 degrees to our left
+            if(rot_diff < Math.PI / 2) keys.r.down();
+            else keys.l.down();
+        } else {
+            // target is to our right
+            // Attempt to keep rot_diff at Math.PI / 2, that is,
+            // keep target 90 degrees to our right
+            if(rot_diff > -Math.PI / 2) keys.l.down();
+            else keys.r.down();
+        }
+    }
+    aimForTarget(target, keys) {
+        // Attempt to chase & shoot down target entity
+        // NOTE: keys is player.keys (presumably this.getPlayer().keys)
+
+        keys.u.up();
+        keys.d.up();
+        keys.l.up();
+        keys.r.up();
+
+        for(var keyname of 'xy') {
+            var shotClass = this.shotClass[keyname];
+
+            // If this is a "standard" shot (as in, it goes forwards and
+            // does damage), then shoot it.
+            keys[keyname].set(shotClass && shotClass.isStandardShot);
+        }
+
+        var dist = this.dist(target);
+        var tdist = this.idealTargetDist;
+        if(dist < tdist) keys.d.down();
+        if(dist > tdist) keys.u.down();
+
+        var angle = this.angle(target);
+        var rot_diff = rotDiff(this.rot, angle);
+        if(rot_diff > 0) {
+            // target is to our left
+            keys.l.down();
+        } else if(rot_diff < 0) {
+            // target is to our right
+            keys.r.down();
+        }
     }
     turn(rot) {
         this.rot_vel += rot;
@@ -3040,9 +3128,21 @@ class CPUPlayer extends BasePlayer {
     // The Entity we're currently interested in, or null.
     target = null;
 
-    // Distance past which we lose interest in our target
-    max_target_dist = 225 * RADIUSMUL;
+    constructor(game) {
+        super(game);
 
+        // Distance past which we lose interest in our target
+        this.max_target_dist = Random.randNumber(150, 300) * RADIUSMUL;
+
+        // fear_hp_percent: hp below which we fear this.target
+        this.fear_hp_percent = Random.randNumber(.15, .9);
+    }
+    getFearHp() {
+        return this.fear_hp_percent * this.entity.maxhp;
+    }
+    isFearful() {
+        return this.entity.hp < this.getFearHp();
+    }
     getTargetDist() {
         // Distance between our entity and our target
         // (Assumes they both exist)
@@ -3062,10 +3162,12 @@ class CPUPlayer extends BasePlayer {
 
         // Press/release keys
         if(this.entity && this.target) {
-            // ...if we have a target, aim for it
-            // (HACK!.. this may not be what all ships want to do.
-            // E.g. SuitShip subclasses attached to rocks...)
-            this.aimForTarget();
+            // Bit hacky, this
+            if(this.isFearful()) {
+                this.entity.avoidTarget(this.target, this.keys);
+            } else {
+                this.entity.aimForTarget(this.target, this.keys);
+            }
         } else if(this.entity) {
 
             // Entity decides which keys to press/release
@@ -3077,36 +3179,26 @@ class CPUPlayer extends BasePlayer {
             this.entity.stepCPUKeys(this.keys);
 
         } else {
-            for(var key of this.keys) key.down();
+            for(var keyname in this.keys) {
+                var key = this.keys[keyname];
+                key.up();
+            }
         }
 
         super.step();
-    }
-    aimForTarget() {
-        this.keys.u.up();
-        this.keys.d.up();
-        this.keys.l.up();
-        this.keys.r.up();
-        this.keys.x.down();
-        this.keys.y.down();
-
-        var dist = this.entity.dist(this.target);
-        var tdist = 30 * RADIUSMUL;
-        if(dist < tdist) this.keys.d.down();
-        if(dist > tdist) this.keys.u.down();
-
-        var angle = this.entity.angle(this.target);
-        var rot_diff = rotDiff(this.entity.rot, angle);
-        if(rot_diff > 0) this.keys.l.down();
-        if(rot_diff < 0) this.keys.r.down();
     }
     renderEntity(canvas, camera, addx, addy) {
         super.renderEntity(canvas, camera, addx, addy);
 
         if(this.entity && this.target) {
             var targetDist = this.getTargetDist();
-            var strokeStyle = 'rgba(200,0,200,.5)';
-            var lineWidth = 1;
+
+            var strokeStyle = 'rgba(255,200,255,.5)';
+            var lineWidth = 2;
+            if(this.isFearful()) {
+                strokeStyle = 'rgba(200,0,200,.5)';
+            }
+
             var fade = Math.max(.25, 1 - targetDist / this.max_target_dist);
             this.entity.renderLineTo(canvas, camera, addx, addy, this.target,
                 strokeStyle, lineWidth, fade);
@@ -3114,7 +3206,9 @@ class CPUPlayer extends BasePlayer {
     }
     tookDamage(other) {
         super.tookDamage(other);
-        this.target = other;
+        if(this.entity && other && !this.entity.isAlly(other)) {
+            this.target = other;
+        }
     }
 }
 
@@ -3999,6 +4093,13 @@ class Ship extends Entity {
 
     static name = 'Ship';
 
+    // idealTargetDist: ideal distance from target based on our weapons etc
+    // (for use by CPU players)
+    idealTargetDist = 30 * RADIUSMUL;
+
+    getShip() {
+        return this;
+    }
     canEmitGold() {
         // Can be overridden by subclasses
         return true;
@@ -4309,7 +4410,7 @@ class AssaultShip extends Ship {
     rotspeed = Math.PI / 26;
     rotmul = .65;
 
-    static maxhp = 100;
+    static maxhp = 135;
 
     shotClass = {
         x: TripleShot,
@@ -4456,12 +4557,19 @@ class HunterShip extends Ship {
                 // Don't uncloak too soon
                 if(Math.random() < .05) key.up();
             } else {
-                // Don't cloak too often
-                if(Math.random() < .01) key.down();
+                // Don't randomly cloak very often
+                if(Math.random() < .002) key.down();
             }
         } else {
             super.stepCPUKey(key);
         }
+    }
+    avoidTarget(target, keys) {
+        super.avoidTarget(target, keys);
+
+        // Cloak unless it would kill us to do so
+        if(this.hp >= 15) keys.y.down();
+        else keys.y.up();
     }
     _canCollide(other) {
         if(this.cloaked) return false;
@@ -5131,6 +5239,8 @@ class CrabShip extends Ship {
 
     addhp = DEFAULT_ADDHP * 4;
 
+    idealTargetDist = 5 * RADIUSMUL;
+
     static maxhp = 200;
 
     shotClass = {
@@ -5392,6 +5502,11 @@ class Shot extends Entity {
     serialPosRotVariance = 0;
     randomPosRotVariance = 0;
 
+    // A "standard" shot goes forwards and does damage.
+    // This is used by cpu-controlling code to decide whether to use
+    // this shot when attempting to shoot at an enemy target.
+    static isStandardShot = true;
+
     isReverseShot = false;
 
     initialSpeed = 20;
@@ -5424,6 +5539,9 @@ class Shot extends Entity {
 
         // The Ship who shot us out
         this.ship = null;
+    }
+    getShip() {
+        return this.ship;
     }
     applyPowerup(level) {
         // This is called by the Entity which fired this Shot, to apply
@@ -5709,6 +5827,8 @@ class DoubleFlameShot extends FlameShot {
 class ReverseFlameShot extends FlameShot {
     isReverseShot = true;
 
+    static isStandardShot = false;
+
     hitDamage = 2;
     static cooldown = 2;
 }
@@ -5723,6 +5843,8 @@ class MineShot extends Shot {
     radius = 6 * RADIUSMUL;
     initialSpeed = 0;
     velmul = .9;
+
+    static isStandardShot = false;
 
     hitDamage = 8;
 
@@ -5810,6 +5932,8 @@ class RopeShot extends Shot {
     initialSpeed = 32;
     initialVelMul = .8;
     velmul = .99;
+
+    static isStandardShot = false;
 
     hitVelMul = .45;
     hitDamage = 0;
@@ -6030,6 +6154,9 @@ class Rock extends Entity {
         this.vel.setSpeed(speed, Random.randRotation());
 
         this.rot_vel = Random.randNumber(-.5, .5) * Math.PI / 40;
+    }
+    getShip() {
+        return this.mole;
     }
     damage(hp, other) {
         if(this.mole) hp /= 2;
