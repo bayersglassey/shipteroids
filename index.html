@@ -5075,8 +5075,9 @@ class MinerShip extends SuitShip {
     // How much of a rock's radius we dig away from it
     dig_radius = 1 * RADIUSMUL;
 
-    // How much "damage" we do to a rock's maxhp by digging it
+    // How much damage we do to a rock's hp and maxhp by digging it
     dig_damage = 10;
+    dig_maxhp_damage = 10;
 
     picture = new Picture([
         // body
@@ -5120,10 +5121,13 @@ class MinerShip extends SuitShip {
     canDig(rock) {
         return (
             rock.radius - this.dig_radius >= MIN_ROCK_RADIUS &&
-            rock.maxhp - this.dig_damage > 0
+            rock.maxhp - this.dig_maxhp_damage > 0
         );
     }
     dig(rock) {
+        // NOTE: we assume that this.canDig(rock) was just called, and
+        // returned true
+
         this.emitPickup(GoldPickup);
 
         rock.emitEffects(SmokeEffect, 4, {
@@ -5133,7 +5137,15 @@ class MinerShip extends SuitShip {
         });
 
         rock.radius -= this.dig_radius;
-        rock.setMaxHp(rock.maxhp - this.dig_damage);
+
+        // Reduce rock's *maximum* hp, so we can't just dig and then
+        // wait for rock's hp to regenerate...
+        rock.setMaxHp(rock.maxhp - this.dig_maxhp_damage);
+
+        // Damage rock a little bit, basically just so that if it has
+        // a mole controlled by a CPU player, then CPU player will be
+        // alerted that it "took damage" from us, so it will target us.
+        rock.damage(this.dig_damage, this);
     }
 }
 
