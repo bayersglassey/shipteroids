@@ -27,6 +27,9 @@ The language is Javascript (ES6) and HTML5 (canvas etc).
 ![](/recs/rec2.gif)
 ![](/recs/rec3.gif)
 ![](/recs/rec4.gif)
+![](/recs/rec5.gif)
+![](/recs/rec6.gif)
+![](/recs/rec7.gif)
 
 ## Screenshots
 
