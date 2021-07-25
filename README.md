@@ -21,6 +21,13 @@ The language is Javascript (ES6) and HTML5 (canvas etc).
 * [itch.io](https://bayersglassey.itch.io/shipteroids/)
 (manually updated when I remember to do so)
 
+## Gameplay clips
+
+![](/recs/rec1.gif)
+![](/recs/rec2.gif)
+![](/recs/rec3.gif)
+![](/recs/rec4.gif)
+
 ## Screenshots
 
 ![](/img/screen-title2.png)
