@@ -1471,6 +1471,13 @@ class Field {
                 }
             }
             for(var pickup of this.pickups) {
+                if(ship.pickupMagnet) {
+                    var d = ship.dist(pickup) - ship.radius - pickup.radius;
+                    if(d <= 50 * RADIUSMUL * ship.pickupMagnet) {
+                        pickup.vel.addSpeed(.2 + .2 * ship.pickupMagnet,
+                            pickup.angle(ship));
+                    }
+                }
                 if(ship.colliding(pickup)) {
                     ship.handleCollision(pickup);
                     pickup.handleCollision(ship);
@@ -3000,6 +3007,10 @@ class Player extends BasePlayer {
     increaseReverseSpeed = 0;
     increaseRotSpeed = 0;
 
+    // pickupMagnet: integer indicating how strong player's ship's pull on
+    // nearby pickups is
+    pickupMagnet = 0;
+
     // (x|y)ShotLevel: integer powerup level for the indicated shot
     // ('x' or 'y').
     // Translates into Shotprops.level.
@@ -3054,6 +3065,8 @@ class Player extends BasePlayer {
 
         ship.maxhp += this.addmaxhp;
         ship.hp += this.addmaxhp;
+
+        ship.pickupMagnet += this.pickupMagnet;
 
         ship.thrustSpeed *= (1 + .65 * this.increaseThrustSpeed);
         ship.reverseSpeed *= (1 + .65 * this.increaseReverseSpeed);
@@ -4096,6 +4109,8 @@ class Ship extends Entity {
     // idealTargetDist: ideal distance from target based on our weapons etc
     // (for use by CPU players)
     idealTargetDist = 30 * RADIUSMUL;
+
+    pickupMagnet = 0;
 
     getShip() {
         return this;
@@ -6307,6 +6322,17 @@ class TrinketShopItem extends ShopItem {
     }
 }
 
+class PickupMagnetShopItem extends ShopItem {
+    name = 'Pickup Magnet';
+    description = 'Increases your ship\'s magnetic pull on nearby energy/fuel/gold.';
+    price = 40;
+
+    buy(player) {
+        super.buy(player);
+        player.pickupMagnet++;
+    }
+}
+
 class MaxEnergyShopItem extends ShopItem {
     description = 'Permanently increases the maximum energy of your ship.';
 
@@ -6660,6 +6686,7 @@ var defaultMap = new function() {
                         new MaxEnergyShopItem(10),
                         new MaxFuelShopItem(10),
                         new MaxFuelShopItem(10),
+                        new PickupMagnetShopItem(),
                         new ShipShopItem(TurretShip, 40),
                         new ShipShopItem(HunterShip, 40),
                         new ShipShopItem(TroopShip, 40),
@@ -6756,6 +6783,7 @@ var defaultMap = new function() {
                         new SecondaryPowerupShopItem(),
                         new SecondaryPowerupShopItem(),
                         new SpeedShopItem(),
+                        new PickupMagnetShopItem(),
                     ]),
             }), {corridor1: 1}),
         corridor2: defnode('Corridor', [],
