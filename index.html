@@ -153,21 +153,29 @@ function getParam(name, default_value) {
     var value = PARAMS.get(name);
     return value === null? default_value: value;
 }
-function getBoolParam(name) {
-    return Boolean(getParam(name, false));
+function getBoolParam(name, default_value) {
+    default_value = getDefault(default_value, false);
+    return Boolean(getParam(name, default_value));
+}
+function getIntParam(name, default_value) {
+    default_value = getDefault(default_value, 0);
+    return parseInt(getParam(name, default_value));
 }
 
 // debug stuff
 var DEBUG = getBoolParam('debug');
-var ALLSHIPS = DEBUG || getBoolParam('allships');
-var RICH = DEBUG || getBoolParam('rich');
+var ALLSHIPS = getBoolParam('allships');
+var RICH = getBoolParam('rich');
+var SHOT_LEVEL = getIntParam('shotlevel');
+var X_SHOT_LEVEL = getIntParam('xshotlevel', SHOT_LEVEL);
+var Y_SHOT_LEVEL = getIntParam('yshotlevel', SHOT_LEVEL);
+var PICKUP_MAGNET = getIntParam('magnet');
 var TIMING = getBoolParam('timing');
 var RENDER_CIRCLES = getBoolParam('render_circles');
 var RENDER_BOUNDARY = getBoolParam('render_boundary');
 var HIDE_TEXT = getBoolParam('hide_text');
 var NODAMAGE = getBoolParam('nodamage');
-var NOVIBRATE = getBoolParam('novibrate');
-var VIBRATE = !NOVIBRATE;
+var VIBRATE = !getBoolParam('novibrate');
 
 // physics tweaking stuff
 var VELMUL = .7;
@@ -190,7 +198,16 @@ var WARP_COLLISION_DAMAGE = 10;
 var WARP_FUEL = 10;
 var MIN_NODE_RADIUS = 5;
 var MAX_NODE_RADIUS = 20;
-var MAX_SHOTPROPS_LEVEL = 3;
+var MAX_SHOT_LEVEL = 3;
+var MAX_PICKUP_MAGNET = 2;
+
+if(DEBUG) {
+    RICH = true;
+    ALLSHIPS = true;
+    PICKUP_MAGNET = MAX_PICKUP_MAGNET;
+    X_SHOT_LEVEL = MAX_SHOT_LEVEL;
+    Y_SHOT_LEVEL = MAX_SHOT_LEVEL;
+}
 
 // Game/field default options
 var DEFAULT_FIELD_WIDTH  = 1000;
@@ -1482,6 +1499,16 @@ class Field {
                     ship.handleCollision(pickup);
                     pickup.handleCollision(ship);
                     ship.handleCollisionPhysics(pickup);
+                }
+            }
+        }
+
+        for(var i = 0; i < this.pickups.length; i++) {
+            var pickup = this.pickups[i];
+            for(var j = i + 1; j < this.pickups.length; j++) {
+                var other = this.pickups[j];
+                if(pickup.colliding(other)) {
+                    pickup.handleCollisionPhysics(other);
                 }
             }
         }
@@ -3009,13 +3036,13 @@ class Player extends BasePlayer {
 
     // pickupMagnet: integer indicating how strong player's ship's pull on
     // nearby pickups is
-    pickupMagnet = 0;
+    pickupMagnet = PICKUP_MAGNET;
 
     // (x|y)ShotLevel: integer powerup level for the indicated shot
     // ('x' or 'y').
     // Translates into Shotprops.level.
-    xShotLevel = 0;
-    yShotLevel = 0;
+    xShotLevel = X_SHOT_LEVEL;
+    yShotLevel = Y_SHOT_LEVEL;
 
     maxfuel = DEFAULT_MAXFUEL;
     fuel = DEFAULT_MAXFUEL / 2;
@@ -4543,7 +4570,7 @@ class HunterShip extends Ship {
             if(cloaked != this.cloaked) {
                 if(cloaked) {
                     var cloakdamage = 2
-                        * (1 - this.shotprops.y.level / MAX_SHOTPROPS_LEVEL);
+                        * (1 - this.shotprops.y.level / MAX_SHOT_LEVEL);
                     this.damage(cloakdamage);
                 }
                 this.cloaked = cloaked;
@@ -6327,6 +6354,15 @@ class PickupMagnetShopItem extends ShopItem {
     description = 'Increases your ship\'s magnetic pull on nearby energy/fuel/gold.';
     price = 40;
 
+    cantBuy(player) {
+        var value = super.cantBuy(player);
+        if(value) return value;
+
+        if(player.pickupMagnet >= MAX_PICKUP_MAGNET) {
+            return 'Pickup magnet already fully upgraded';
+        }
+        return null;
+    }
     buy(player) {
         super.buy(player);
         player.pickupMagnet++;
@@ -6388,7 +6424,7 @@ class BasePowerupShopItem extends ShopItem {
         var value = super.cantBuy(player);
         if(value) return value;
 
-        if(player[this.keyname + 'ShotLevel'] >= MAX_SHOTPROPS_LEVEL) {
+        if(player[this.keyname + 'ShotLevel'] >= MAX_SHOT_LEVEL) {
             return 'Already fully powered up';
         }
         return null;
