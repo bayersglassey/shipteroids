@@ -161,10 +161,14 @@ function getIntParam(name, default_value) {
     default_value = getDefault(default_value, 0);
     return parseInt(getParam(name, default_value));
 }
+function getFloatParam(name, default_value) {
+    default_value = getDefault(default_value, 0);
+    return parseFloat(getParam(name, default_value));
+}
 
 // debug stuff
 var DEBUG = getBoolParam('debug');
-var ALLSHIPS = getBoolParam('allships');
+var ALL_SHIPS = getBoolParam('all_ships');
 var RICH = getBoolParam('rich');
 var SHOT_LEVEL = getIntParam('shotlevel');
 var X_SHOT_LEVEL = getIntParam('xshotlevel', SHOT_LEVEL);
@@ -178,32 +182,35 @@ var NODAMAGE = getBoolParam('nodamage');
 var VIBRATE = !getBoolParam('novibrate');
 
 // physics tweaking stuff
-var VELMUL = .7;
-var MAXSPEED = 80;
-var ROTVELMUL = .5;
-var RADIUSMUL = 2;
-var DAMAGEMUL = 1;
+var VELMUL = getFloatParam('velmul', .7); // multiplier for vel when being added to pos
+var ADDVELMUL = getFloatParam('addvelmul', 0); // number between 0 and 1, increases velmul towards 1
+var SHIP_ADDVELMUL = getFloatParam('ship_addvelmul', 0); // number between 0 and 1, increases ships' velmul towards 1
+var MAXSPEED = getFloatParam('maxspeed', 80);
+var ROTVELMUL = getFloatParam('rotvelmul', .5);
+var RADIUSMUL = getFloatParam('radiusmul', 2);
+var DAMAGEMUL = getFloatParam('damagemul', 1);
 var DEFAULT_ROCK_RADIUS = 10 * RADIUSMUL;
 var MIN_ROCK_RADIUS = 9 * RADIUSMUL;
-var WARP_RADIUS = 10 * RADIUSMUL;
-var WARP_AFTER_STEPS = 30;
-var WARP_RADIUS = 10;
-var MAX_WARP_ADDRADIUS = 16;
+var WARP_AFTER_STEPS = getIntParam('warp_after', 35);
 var MAX_ROT_VEL = Math.PI / 5;
-var DEFAULT_ADDHP = 1 / 40;
-var DEFAULT_ADDFUEL = 1 / 80;
+var DEFAULT_ADDHP = getFloatParam('addhp', 1 / 40);
+var DEFAULT_ADDFUEL = getFloatParam('addfuel', 1 / 80);
 var DEFAULT_MAXFUEL = 100;
 var MAXGOLD = 999;
-var WARP_COLLISION_DAMAGE = 10;
-var WARP_FUEL = 10;
-var MIN_NODE_RADIUS = 5;
-var MAX_NODE_RADIUS = 20;
-var MAX_SHOT_LEVEL = 3;
-var MAX_PICKUP_MAGNET = 2;
+var WARP_COLLISION_DAMAGE = getFloatParam('warp_collision_damage', 10);
+var WARP_FUEL = getFloatParam('warp_fuel', 10);
+var MIN_MAP_NODE_RADIUS = 5;
+var MAX_MAP_NODE_RADIUS = 20;
+var MAX_SHOT_LEVEL = getIntParam('max_shot_level', 3);
+var MAX_PICKUP_MAGNET = getIntParam('max_pickup_magnet', 2);
+
+var SLOMO = getFloatParam('slomo', 0); // number between 0 and 1, slows down physics
+VELMUL = linear(VELMUL, 0, SLOMO);
+ADDVELMUL = linear(ADDVELMUL, 1, SLOMO);
 
 if(DEBUG) {
     RICH = true;
-    ALLSHIPS = true;
+    ALL_SHIPS = true;
     PICKUP_MAGNET = MAX_PICKUP_MAGNET;
     X_SHOT_LEVEL = MAX_SHOT_LEVEL;
     Y_SHOT_LEVEL = MAX_SHOT_LEVEL;
@@ -1031,7 +1038,7 @@ class MapNode extends Particle {
         var speed = Random.randNumber(250);
         var rot = Random.randRotation();
         this.pos.addSpeed(speed, rot);
-        this.radius = Random.randNumber(MIN_NODE_RADIUS, MAX_NODE_RADIUS);
+        this.radius = Random.randNumber(MIN_MAP_NODE_RADIUS, MAX_MAP_NODE_RADIUS);
 
         this.strokeStyle = Random.randColor(80, 256, .75);
         this.fillStyle = 'rgba(255,255,255,.25)';
@@ -2239,6 +2246,10 @@ class Entity extends Sprite {
         // so they know they should stop referencing it
         this.removed = false;
     }
+    getVelMul() {
+        // May be overridden by subclasses
+        return linear(this.velmul, 1, ADDVELMUL);
+    }
     getShip() {
         // Return the ship to which we "belong", e.g. this if this
         // is a Ship, or the ship which shot this if this is a Shot,
@@ -2348,7 +2359,7 @@ class Entity extends Sprite {
         if(this.thrustEffectCooldown > 0) this.thrustEffectCooldown--;
 
         if(this.is_warping) {
-            var speed = this.thrustSpeed * 2 / Math.pow(this.velmul, 3);
+            var speed = this.thrustSpeed * 2 / Math.pow(this.getVelMul(), 3);
             this.thrust(speed, this.rot, {cls: null});
             if(this.age % 3 === 0) {
                 this.addThrustEffects(speed, this.rot + Math.PI, {
@@ -2381,7 +2392,7 @@ class Entity extends Sprite {
         if(this.rot_vel < -MAX_ROT_VEL) this.rot_vel = -MAX_ROT_VEL;
         if(this.rot_vel > MAX_ROT_VEL) this.rot_vel = MAX_ROT_VEL;
 
-        this.vel.mul(this.velmul);
+        this.vel.mul(this.getVelMul());
         this.rot += this.rot_vel * ROTVELMUL;
         this.rot_vel *= this.rotmul;
 
@@ -3050,7 +3061,7 @@ class Player extends BasePlayer {
     maxgold = MAXGOLD;
     gold = RICH? MAXGOLD: 0;
 
-    shipClasses = ALLSHIPS? SHIP_CLASSES.getValues():
+    shipClasses = ALL_SHIPS? SHIP_CLASSES.getValues():
         [FighterShip, ScoutShip, AssaultShip];
 
     // gamepad: an HTML5 Gamepad instance, or null
@@ -3963,7 +3974,7 @@ class MapMenu extends Menu {
 
                 // arrowPointSideLen: length in pixels of side of arrow's point
                 var arrowPointSideLen = 12
-                    * linear(node.radius, node2.radius, .75) / MAX_NODE_RADIUS
+                    * linear(node.radius, node2.radius, .75) / MAX_MAP_NODE_RADIUS
                     * edge.len;
 
                 // arrowPointAngle: the angle of the arrow's point
@@ -4139,6 +4150,11 @@ class Ship extends Entity {
 
     pickupMagnet = 0;
 
+    getVelMul() {
+        // Kind of ganky: all ships' velmul can be modified by a global
+        // variable, so we can quickly tweak the "slidiness" of the controls
+        return linear(super.getVelMul(), 1, SHIP_ADDVELMUL);
+    }
     getShip() {
         return this;
     }
@@ -4447,7 +4463,7 @@ class AssaultShip extends Ship {
     static name = 'Assault';
     radius = 12 * RADIUSMUL;
     thrustSpeed = 1.25;
-    reverseSpeed = .5;
+    reverseSpeed = .75;
     velmul = .95;
     rotspeed = Math.PI / 26;
     rotmul = .65;
@@ -4854,7 +4870,7 @@ class MoleShip extends Ship {
             this.vel.y += dy * .1;
 
             rock.rot_vel *= .95;
-            rock.vel.mul(this.velmul);
+            rock.vel.mul(this.getVelMul());
 
             var addhp = (1 / 20) * (1 + .75 * this.shotprops.y.level);
             rock.heal(addhp);
@@ -5753,6 +5769,12 @@ class BlasterShot extends Shot {
 
     picture = Picture.newPolygon(6);
 
+    afterShotBy(entity) {
+        super.afterShotBy(entity);
+
+        // Firing this weapon has a "push back" effect on whatever fired it
+        entity.vel.addSpeed(-this.initialVelMul * 8, this.rot);
+    }
     die() {
         this.emitEffects(SmokeEffect, 3, {
             speed_min: 3,
@@ -6272,7 +6294,7 @@ class Planet extends Entity {
 
         this.pos.setRandomWithin(field.size);
 
-        var speed = Random.randNumber(6,9) * VELMUL;
+        var speed = Random.randNumber(4,6);
         this.vel.setSpeed(speed, Random.randRotation());
 
         this.rot_vel = Random.randNumber(-.5, .5) * Math.PI / 40;
