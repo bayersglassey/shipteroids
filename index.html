@@ -1505,7 +1505,6 @@ class Field {
                 if(ship.colliding(pickup)) {
                     ship.handleCollision(pickup);
                     pickup.handleCollision(ship);
-                    ship.handleCollisionPhysics(pickup);
                 }
             }
         }
@@ -4988,6 +4987,7 @@ class SuitShip extends Ship {
     thrustEffectClass = null;
 
     rock = null;
+    rock_cooldown = 0;
 
     // rockPos: our target position on the surface of this.rock
     // (We store this point on ourself just so we don't have to allocate
@@ -4999,12 +4999,17 @@ class SuitShip extends Ship {
     step() {
         if(this.rock && this.rock.removed) this.unsetRock();
 
+        if(this.rock_cooldown > 0) this.rock_cooldown--;
+
         super.step();
 
         if(this.rock) this.followRock();
     }
     setRock(rock) {
         this.rock = rock;
+
+        // Wait this many ticks before being able to jump back off rock
+        this.rock_cooldown = 10;
 
         if(this.pos.eq(rock.pos)) {
             this.rot = Random.randRotation();
@@ -5021,6 +5026,10 @@ class SuitShip extends Ship {
     }
     unsetRock() {
         this.rock = null;
+
+        // Wait this many ticks before being able to land on another rock
+        this.rock_cooldown = 10;
+
         this.emitEffects(SmokeEffect, 2, {
             speed_min: 3,
             speed_max: 6,
@@ -5045,21 +5054,10 @@ class SuitShip extends Ship {
     }
     fire(keyname) {
         if(keyname === 'y') {
-            var shotprops = this.shotprops[keyname];
-            if(this.rock) {
-                super.fire(keyname);
-            } else {
-                var foundRock = null;
-                for(var rock of this.field.rocks) {
-                    if(!this.colliding(rock)) continue;
-                    foundRock = rock;
-                    break;
-                }
-                if(foundRock) {
-                    this.setRock(foundRock);
-                    shotprops.cooldown += 30;
-                }
-            }
+            // Only fire 'y' when we're on a rock.
+            // Otherwise, 'y' is used to *land* on rocks (which is handled
+            // elsewhere, see _handleKeys)
+            if(this.rock) super.fire(keyname);
         } else {
             super.fire(keyname);
         }
@@ -5068,11 +5066,10 @@ class SuitShip extends Ship {
         if(this.rock) {
             // Override Ship._handleKeys entirely
 
-            if(this.keys.u.wasDown && this.shotprops['y'].cooldown === 0) {
+            if(this.keys.u.wasDown && this.rock_cooldown === 0) {
                 // Jump off this.rock
                 this.vel.addSpeed(this.thrustSpeed * 5, this.rot);
                 this.unsetRock();
-                this.shotprops['y'].cooldown += 30;
                 return;
             }
 
@@ -5090,6 +5087,21 @@ class SuitShip extends Ship {
                 this.turn(-rotspeed);
             }
         } else {
+
+            if(this.keys.y.wasDown && this.rock_cooldown === 0) {
+                // Attempt to land on any rock we're in contact with
+
+                var foundRock = null;
+                for(var rock of this.field.rocks) {
+                    if(!this.colliding(rock)) continue;
+                    foundRock = rock;
+                    break;
+                }
+                if(foundRock) {
+                    this.setRock(foundRock);
+                }
+            }
+
             super._handleKeys();
         }
     }
@@ -5158,7 +5170,10 @@ class MinerShip extends SuitShip {
         this.dig_cooldown -= 15 * this.shotprops.y.level;
     }
     fire(keyname) {
-        if(keyname === 'y' && this.rock && this.canDig(this.rock)) {
+        if(
+            keyname === 'y' && this.rock && this.canDig(this.rock) &&
+            this.rock_cooldown === 0
+        ) {
             this.dig(this.rock);
             var shotprops = this.shotprops[keyname];
             shotprops.cooldown += this.dig_cooldown;
@@ -5168,11 +5183,13 @@ class MinerShip extends SuitShip {
     }
     canPickup(pickup) {
 
-        // Slightly hacky:
-        // MinerShip can't pick up gold when standing on a rock.
+        // MinerShip can't pick up gold while its digger is cooling down.
         // (So that it doesn't immediately pick up gold it generates
         // by digging)
-        if(this.rock && pickup instanceof GoldPickup) return false;
+        if(
+            pickup instanceof GoldPickup &&
+            this.shotprops.y.cooldown > 0
+        ) return false;
 
         return super.canPickup(pickup);
     }
@@ -5269,7 +5286,7 @@ class TroopShip extends SuitShip {
     static maxhp = 95;
 
     shotClass = {
-        x: DoubleFlameShot,
+        x: TripleToolShot,
         y: DoubleMissileShot,
     };
 
@@ -5991,6 +6008,8 @@ class ToolShot extends Shot {
     maxAge = 25;
     static cooldown = 12;
 
+    fadeWithAge = true;
+
     picture = new Picture([
         new Shape([
             Point.unit(0 / 4),
@@ -6001,6 +6020,13 @@ class ToolShot extends Shot {
             Point.unit(3 / 4),
         ], {fill: false}),
     ]);
+}
+
+class TripleToolShot extends ToolShot {
+    static initialShots = 3;
+    initialRotVariance = Math.PI / 13;
+    hitDamage = 5;
+    static cooldown = 7;
 }
 
 class RopeShot extends Shot {
@@ -6018,6 +6044,8 @@ class RopeShot extends Shot {
     connectedMaxAge = 0;
     stuckMaxAge = 200;
     static cooldown = 23;
+
+    fadeWithAge = true;
 
     picture = new Picture([
         new Shape([
