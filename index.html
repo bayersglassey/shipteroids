@@ -2213,6 +2213,16 @@ class Entity extends Sprite {
 
     addhp = DEFAULT_ADDHP;
 
+    // How much of a rock's radius we dig away from it
+    dig_radius = 2 * RADIUSMUL;
+
+    // Chance of producing gold when we dig a rock
+    dig_gold_chance = 1;
+
+    // How much damage we do to a rock's hp and maxhp by digging it
+    dig_damage = 10;
+    dig_maxhp_damage = 10;
+
     constructor(field) {
         super(field);
 
@@ -2764,6 +2774,35 @@ class Entity extends Sprite {
             this.rot_vel  += other.rot_vel * r1 * rot_velmul;
             other.rot_vel += this.rot_vel  * r0 * rot_velmul;
         }
+    }
+    canDig(rock) {
+        return (
+            rock.radius - this.dig_radius >= MIN_ROCK_RADIUS &&
+            rock.maxhp - this.dig_maxhp_damage > 0
+        );
+    }
+    dig(rock) {
+        // NOTE: we assume that this.canDig(rock) was just called, and
+        // returned true
+
+        if(Math.random() < this.dig_gold_chance) this.emitPickup(GoldPickup);
+
+        rock.emitEffects(SmokeEffect, 4, {
+            speed_min: 3,
+            speed_max: 6,
+            velmul: .65,
+        });
+
+        rock.radius -= this.dig_radius;
+
+        // Reduce rock's *maximum* hp, so we can't just dig and then
+        // wait for rock's hp to regenerate...
+        rock.setMaxHp(rock.maxhp - this.dig_maxhp_damage);
+
+        // Damage rock a little bit, basically just so that if it has
+        // a mole controlled by a CPU player, then CPU player will be
+        // alerted that it "took damage" from us, so it will target us.
+        rock.damage(this.dig_damage, this);
     }
     canWarp() {
         // May be overridden by subclasses
@@ -5142,13 +5181,6 @@ class MinerShip extends SuitShip {
 
     dig_cooldown = 100;
 
-    // How much of a rock's radius we dig away from it
-    dig_radius = 1 * RADIUSMUL;
-
-    // How much damage we do to a rock's hp and maxhp by digging it
-    dig_damage = 10;
-    dig_maxhp_damage = 10;
-
     picture = new Picture([
         // body
         Shape.newPolygon(3, {rot: Math.PI}).addxy(-.3, 0).mul(.9),
@@ -5192,35 +5224,6 @@ class MinerShip extends SuitShip {
         ) return false;
 
         return super.canPickup(pickup);
-    }
-    canDig(rock) {
-        return (
-            rock.radius - this.dig_radius >= MIN_ROCK_RADIUS &&
-            rock.maxhp - this.dig_maxhp_damage > 0
-        );
-    }
-    dig(rock) {
-        // NOTE: we assume that this.canDig(rock) was just called, and
-        // returned true
-
-        this.emitPickup(GoldPickup);
-
-        rock.emitEffects(SmokeEffect, 4, {
-            speed_min: 3,
-            speed_max: 6,
-            velmul: .65,
-        });
-
-        rock.radius -= this.dig_radius;
-
-        // Reduce rock's *maximum* hp, so we can't just dig and then
-        // wait for rock's hp to regenerate...
-        rock.setMaxHp(rock.maxhp - this.dig_maxhp_damage);
-
-        // Damage rock a little bit, basically just so that if it has
-        // a mole controlled by a CPU player, then CPU player will be
-        // alerted that it "took damage" from us, so it will target us.
-        rock.damage(this.dig_damage, this);
     }
 }
 
@@ -6208,12 +6211,11 @@ class BoreShot extends Shot {
         ]).mulxy(1, .5),
     ]);
 
-    gold_chance = 1;
+    dig_gold_chance = .25;
 
     hit(other) {
         if(other instanceof Rock) {
-            if(Math.random() < this.gold_chance) this.emitPickup(GoldPickup);
-            other.dieFromDamage();
+            this.dig(other);
             this.die();
         } else {
             super.hit(other);
