@@ -121,12 +121,6 @@ body {
 * Should be able to aim camera at a player (camera.targetPlayer) so we don't
 * need maps to call setTarget explicitly...
 *
-* When a player loses their ship, reset players' keys (otherwise e.g. they can
-* still be holding Up while you're in the menu choosing ships)
-* (Is this... already done?)
-*
-* Seems like one end of RopeShot can get stuck to something and live forever...
-*
 * Better instructions, "story"...
 * Collectables which affect the map. ("switches"? "keys"?)
 * Warping is fiddly, so start game with it disabled.
@@ -1495,7 +1489,7 @@ class Field {
                 }
             }
             for(var pickup of this.pickups) {
-                if(ship.pickupMagnet) {
+                if(ship.pickupMagnet && ship.canPickup(pickup)) {
                     var d = ship.dist(pickup) - ship.radius - pickup.radius;
                     if(d <= 50 * RADIUSMUL * ship.pickupMagnet) {
                         pickup.vel.addSpeed(.2 + .2 * ship.pickupMagnet,
@@ -2220,7 +2214,6 @@ class Entity extends Sprite {
     dig_gold_chance = 1;
 
     // How much damage we do to a rock's hp and maxhp by digging it
-    dig_damage = 10;
     dig_maxhp_damage = 10;
 
     constructor(field) {
@@ -2799,10 +2792,10 @@ class Entity extends Sprite {
         // wait for rock's hp to regenerate...
         rock.setMaxHp(rock.maxhp - this.dig_maxhp_damage);
 
-        // Damage rock a little bit, basically just so that if it has
+        // Damage rock with 0 damage, basically just so that if it has
         // a mole controlled by a CPU player, then CPU player will be
         // alerted that it "took damage" from us, so it will target us.
-        rock.damage(this.dig_damage, this);
+        rock.damage(0, this);
     }
     canWarp() {
         // May be overridden by subclasses
@@ -4926,6 +4919,14 @@ class MoleShip extends Ship {
                 if(Math.random() < .5) key.down();
                 else key.up();
             }
+        } else if(key.name === 'u') {
+            // Rocks are heavy, so mostly try to fly forward
+            if(Math.random() < .01) key.up();
+            else key.down();
+        } else if(key.name === 'd') {
+            // Rocks are heavy, so mostly just try to fly forward
+            if(Math.random() < .01) key.down();
+            else key.up();
         } else {
             super.stepCPUKey(key);
         }
@@ -5010,6 +5011,10 @@ class MoleShip extends Ship {
         if(other === this.rock) return true;
         return super._isAlly(other);
     }
+    canPickup(pickup) {
+        if(this.rock) return false;
+        return super.canPickup(pickup);
+    }
 }
 
 class SuitShip extends Ship {
@@ -5049,6 +5054,11 @@ class SuitShip extends Ship {
 
         // Wait this many ticks before being able to jump back off rock
         this.rock_cooldown = 10;
+
+        // We just landed on a rock, which means we were holding down 'y'
+        // button. So add some cooldown before doing our 'y' action on the
+        // rock.
+        this.shotprops.y.cooldown += 10;
 
         if(this.pos.eq(rock.pos)) {
             this.rot = Random.randRotation();
