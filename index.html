@@ -57,10 +57,12 @@ body {
 *
 * "Ball and chain" ship (hold attack to send out chain on spring, release
 * to have it come back to you)
+* Each ball & chain is a separate projectile.
+* So, hold 'x' to fire it out; it has a max length & springiness while you
+* continue to hold 'x'; but once you release, the spring disappears and the
+* ball carries on.
 *
-* "Laser cannon" ship, whose weapon creates small damaging particles in a
-* line radiating out from it.
-* 'x' shot is small rapid lasers, 'y' shot is a big charge-up one?..
+* "Snake" ship
 *
 * Slightly better AI: each CPUPlayer can have 1 target, which is rendered
 * as a line. By default, when cpu player is hit, it targets the shot's ship.
@@ -566,6 +568,10 @@ class Point {
     eq(other) {
         return this.x === other.x && this.y === other.y;
     }
+    flip() {
+        this.y = -this.y;
+        return this;
+    }
     addxy(x, y) {
         this.x += getDefault(x, 0);
         this.y += getDefault(y, 0);
@@ -637,6 +643,14 @@ class Point {
                 console.log('Invalid array element', elem);
                 throw new Error('Invalid array element');
             }
+        }
+        return points;
+    }
+    static mirror(points) {
+        var i0 = points.length - 1;
+        for(var i = i0; i >= 0; i--) {
+            var point = points[i];
+            points.push(point.clone().flip());
         }
         return points;
     }
@@ -1673,7 +1687,7 @@ class Shape {
         return shape;
     }
     flip() {
-        for(var point of this.points) point.y = -point.y;
+        for(var point of this.points) point.flip();
         return this;
     }
     add(other_point) {
@@ -2571,26 +2585,6 @@ class Entity extends Sprite {
                 .addSpeed(speed, Random.randRotation());
         }
     }
-    emitShots(cls, n_shots, opts) {
-        var rot_variance = getDefault(opts.rot_variance, 0);
-        var rand_rot_variance = getDefault(opts.rand_rot_variance, 0);
-        var speed_min = getDefault(opts.speed_min, 0);
-        var speed_max = getDefault(opts.speed_max, 0);
-
-        var velmul = .8;
-        for(var i = 0; i < n_shots; i++) {
-            var shot = this.field.addShot(cls);
-            shot.ship = this.ship;
-            shot.setTeam(this.team);
-            shot.pos.copy(this.pos);
-            shot.rot = this.rot
-                + getRotVariance(i, n_shots) * rot_variance
-                + Random.randNumber(-.5, .5) * rand_rot_variance;
-            var speed = Random.randNumber(speed_min, speed_max);
-            shot.vel.copy(this.vel).mul(velmul)
-                .addSpeed(speed, shot.rot);
-        }
-    }
     fire(keyname) {
         var shotprops = this.shotprops[keyname];
         var cls = this.shotClass[keyname];
@@ -2615,13 +2609,19 @@ class Entity extends Sprite {
         // Subclasses may add special behaviour...
         shot.afterShotBy(this);
     }
+    _shoot(cls) {
+        var shot = this.field.addShot(cls);
+        shot.ship = this;
+        shot.setTeam(this.team);
+        shot.pos.copy(this.pos);
+        shot.rot = this.rot;
+        return shot;
+    }
     shoot(cls, shot_i, serial_shot_i, shotprops) {
         // shot_i: index of this shot. E.g. if 3 are being fired at once,
         // this one might be 0, 1, or 2.
 
-        var shot = this.field.addShot(cls);
-        shot.ship = this;
-        shot.setTeam(this.team);
+        var shot = this._shoot(cls);
         shot.applyPowerup(shotprops.level);
 
         shot.rot = this.rot
@@ -2651,8 +2651,7 @@ class Entity extends Sprite {
             speed = -speed;
         }
 
-        shot.pos.copy(this.pos)
-            .addSpeed(addpos, shot.rot + posrot);
+        shot.pos.addSpeed(addpos, shot.rot + posrot);
         shot.vel.copy(this.vel)
             .mul(shot.initialVelMul)
             .addSpeed(speed, shot.rot);
@@ -4919,14 +4918,6 @@ class MoleShip extends Ship {
                 if(Math.random() < .5) key.down();
                 else key.up();
             }
-        } else if(key.name === 'u') {
-            // Rocks are heavy, so mostly try to fly forward
-            if(Math.random() < .01) key.up();
-            else key.down();
-        } else if(key.name === 'd') {
-            // Rocks are heavy, so mostly just try to fly forward
-            if(Math.random() < .01) key.down();
-            else key.up();
         } else {
             super.stepCPUKey(key);
         }
@@ -5588,6 +5579,35 @@ class BoreShip extends Ship {
     ]);
 }
 
+class CannonShip extends Ship {
+    static name = 'Cannon';
+
+    radius = 9 * RADIUSMUL;
+    thrustSpeed = .8;
+    reverseSpeed = .4;
+    velmul = .99;
+    rotspeed = Math.PI / 65;
+    rotmul = .85;
+
+    static maxhp = 100;
+
+    shotClass = {
+        x: DoubleCannonShot,
+        y: SuperCannonShot,
+    };
+
+    picture = new Picture([
+        new Shape(Point.mirror([
+            new Point(-1  , -1 ),
+            new Point(-.8 , -1 ),
+            new Point(-.8 , -.5),
+            new Point( 1 , -.5),
+            new Point( 1 , -.2),
+            new Point( 0 , -.2),
+        ])),
+    ]);
+}
+
 class Shot extends Entity {
     static name = 'Shot';
 
@@ -5632,6 +5652,8 @@ class Shot extends Entity {
 
     hitEffectClass = SparkEffect;
 
+    level = 0;
+
     static cooldown = 4;
 
     constructor(field) {
@@ -5643,14 +5665,38 @@ class Shot extends Entity {
     getShip() {
         return this.ship;
     }
+    emitShots(cls, n_shots, opts) {
+        var rot_variance = getDefault(opts.rot_variance, 0);
+        var rand_rot_variance = getDefault(opts.rand_rot_variance, 0);
+        var speed_min = getDefault(opts.speed_min, 0);
+        var speed_max = getDefault(opts.speed_max, 0);
+
+        var velmul = .8;
+        for(var i = 0; i < n_shots; i++) {
+            var shot = this._shoot(cls);
+            shot.rot = this.rot
+                + getRotVariance(i, n_shots) * rot_variance
+                + Random.randNumber(-.5, .5) * rand_rot_variance;
+            var speed = Random.randNumber(speed_min, speed_max);
+            shot.vel.copy(this.vel).mul(velmul)
+                .addSpeed(speed, shot.rot);
+
+            // Emitted shots "inherit" emitting shot's power level
+            shot.applyPowerup(this.level);
+        }
+    }
     applyPowerup(level) {
-        // This is called by the Entity which fired this Shot, to apply
-        // any powerups it may have had.
+        // This is called by the Entity which fired this Shot (or the Shot
+        // which emitted this Shot), to apply any powerups it may have had.
         level = getDefault(level, 0);
 
         this.radius += Math.ceil(this.radius * .075) * level;
         this.hitDamage += Math.ceil(this.hitDamage / 4) * level;
         this.initialSpeed += Math.ceil(this.initialSpeed / 4) * level;
+
+        // Store level on this shot (used e.g. if this shot creates
+        // more shots)
+        this.level = level;
     }
     afterShotBy(entity) {
         // Bit of a hack, called by Entity.shoot, Entity.emitShots, etc.
@@ -5884,6 +5930,100 @@ class QuadrupleMissileShot extends MissileShot {
     serialRotVariance = Math.PI / 4;
     serialPosRotVariance = Math.PI;
     static cooldown = 8;
+}
+
+class CannonShot extends Shot {
+    radius = 4 * RADIUSMUL;
+    initialSpeed = 0;
+    initialVelMul = 1;
+    velmul = 1;
+
+    hitVelMul = .05;
+    hitDamage = 5;
+
+    maxAge = 12;
+    static cooldown = 8;
+
+    shouldRenderCircle = true;
+    shouldRenderCircleLine = false;
+    circleStrokeStyle = 'transparent';
+    circleFillStyle = 'rgba(255,255,255,.75)';
+
+    numChildShots = 12;
+    childShotSpacing = 9 * RADIUSMUL;
+
+    cannonColors = {
+        r: [255, 255],
+        g: [255, 180],
+        b: [255, 100],
+        a: [.5, .5],
+    };
+
+    afterShotBy(entity) {
+        super.afterShotBy(entity);
+
+        for(var i = 0; i < this.numChildShots; i++) {
+
+            // shot_i: the shot we're about to create is the "i"th shot,
+            // where i = 0 corresponds to the initial shot (that is, the shot
+            // for which the afterShotBy method is currently being called).
+            var shot_i = i + 1;
+
+            var shot = entity._shoot(this.constructor);
+            shot.pos.addSpeed(
+                shot_i * this.childShotSpacing, this.rot);
+            shot.vel.copy(this.vel);
+            shot.age = this.numChildShots - shot_i - 1;
+            shot.applyPowerup(this.level);
+        }
+
+        // The current shot is considered the 0th shot, that is, shot_i = 0
+        var shot_i = 0;
+        this.age = this.numChildShots - shot_i - 1;
+    }
+    step() {
+        super.step();
+
+        this.radius = Math.max(1 * RADIUSMUL, this.radius - .5 * RADIUSMUL);
+
+        var m = this.age / this.maxAge;
+        var r = this.cannonColors.r;
+        var g = this.cannonColors.g;
+        var b = this.cannonColors.b;
+        var a = this.cannonColors.a;
+        this.circleStrokeStyle = 'transparent';
+        this.circleFillStyle = Color.rgba(
+            linear(r[0], r[1], m),
+            linear(g[0], g[1], m),
+            linear(b[0], b[1], m),
+            linear(a[0], a[1], m));
+    }
+}
+
+class DoubleCannonShot extends CannonShot {
+    static serialShots = 2;
+    serialPosRotVariance = Math.PI / 4;
+}
+
+class SuperCannonShot extends CannonShot {
+    radius = 8 * RADIUSMUL;
+    initialSpeed = 10;
+
+    maxAge = 22;
+    static cooldown = 45;
+
+    static vibrateDuration = 200;
+    static vibrateStrongMagnitude = .2;
+
+    numChildShots = 12;
+    childShotSpacing = 12 * RADIUSMUL;
+
+    cannonColors = {
+        r: [200, 50],
+        g: [150, 0],
+        b: [255, 255],
+        a: [.75, .25],
+    };
 }
 
 class FlameShot extends Shot {
@@ -6560,6 +6700,7 @@ var SHIP_CLASSES = new OrderedDict()
     .set('engineer', EngineerShip)
     .set('troop', TroopShip)
     .set('bore', BoreShip)
+    .set('cannon', CannonShip)
 ;
 
 
