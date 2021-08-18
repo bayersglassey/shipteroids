@@ -3285,6 +3285,11 @@ class HumanPlayer extends Player {
         // "Revive" the ship "killed" when you warped from previous area
         var ship = this.createShip();
         if(this.shipHp !== null) ship.setHp(this.shipHp);
+
+        // Attempt to center our camera on our ship
+        var camera = this.getCamera();
+        if(camera) camera.initFromTarget();
+
         return ship;
     }
     setMenu(cls) {
@@ -3317,7 +3322,7 @@ class HumanPlayer extends Player {
                 this.menu.step();
             }
         } else if(enterWasPressed) {
-            this.setMenu(ChooseShipMenu);
+            this.setMenu(MainMenu);
         } else if(this.keys.tab.isDown) {
             this.setMenu(TabMapMenu);
         } else {
@@ -3507,7 +3512,9 @@ class Game {
         this.field.populate(template);
 
         this.cameras = [];
-        for(var player of this.players) player.addCamera();
+        for(var player of this.players) {
+            var camera = player.addCamera();
+        }
     }
     addCamera() {
         var camera = new Camera(this.field);
@@ -3813,6 +3820,138 @@ class Menu {
     }
 }
 
+class BranchingMenuOption {
+    /* An option of BranchingMenu */
+
+    constructor(title, submenu_cls, description) {
+        this.title = title;
+        this.submenu_cls = submenu_cls;
+        this.description = getDefault(description, null);
+    }
+}
+
+class BranchingMenu extends Menu {
+    /* A menu whose purpose is to list submenus (i.e. branches). */
+
+    title = "Branching Menu";
+
+    // Array of string
+    description = [];
+
+    // option_i: index into this.options, or -1 for "go back"
+    option_i = -1;
+
+    // options: Array of BranchingSubmenuOption
+    // (to be overridden by subclasses)
+    options = null;
+
+    // Array of string, set by this.update()
+    subtitles = null;
+
+    getSelectedOption() {
+        if(!this.options.length) return null;
+        if(this.option_i < 0) return null;
+        return this.options[this.option_i];
+    }
+    update() {
+        this.subtitles = this.description.slice();
+        this.subtitles.push('');
+
+        var LBRACKET = '> ';
+        var RBRACKET = ' <';
+
+        if(!this.options.length) {
+            this.subtitles.push('...no options!');
+        }
+
+        var subtitle = 'Leave menu';
+        if(this.option_i === -1) {
+            subtitle = LBRACKET + subtitle + RBRACKET;
+        }
+        this.subtitles.push(subtitle);
+
+        var selected_option = this.getSelectedOption();
+
+        for(var i = 0; i < this.options.length; i++) {
+            var option = this.options[i];
+
+            var subtitle = option.title;
+            if(option === selected_option) {
+                subtitle = LBRACKET + subtitle + RBRACKET;
+            }
+            this.subtitles.push(subtitle);
+        }
+
+        if(selected_option && selected_option.decription) {
+            this.subtitles.push('');
+            this.subtitles.push(selected_option.description);
+        }
+    }
+    keyDown(keyname) {
+        if(keyname === 'u') {
+            this.option_i--;
+            if(this.option_i < -1) {
+                this.option_i = this.options.length - 1;
+            }
+            this.update();
+        } else if(keyname === 'd') {
+            this.option_i++;
+            if(this.option_i >= this.options.length) {
+                this.option_i = -1;
+            }
+            this.update();
+        } else if(keyname === 'enter') {
+            if(this.option_i === -1) {
+                this.player.unsetMenu();
+            } else {
+                var option = this.getSelectedOption();
+                if(option) {
+                    this.player.setMenu(option.submenu_cls);
+                    this.update();
+                }
+            }
+        }
+    }
+    render(canvas) {
+        this.game.renderTitle(canvas, this.title, this.subtitles);
+    }
+}
+
+class MainMenu extends BranchingMenu {
+    title = "Main menu";
+    description = [
+        "The primary menu",
+        "which you might want to use",
+    ];
+    options = [
+        new BranchingMenuOption("Choose ship", ChooseShipMenu),
+        new BranchingMenuOption("Empty menu", EmptyMenu),
+    ];
+
+    constructor(player) {
+        super(player);
+
+        // Annoyingly, the way ES6 classes work, we can't just have super's
+        // constructor call this, because this.options etc won't have been
+        // overridden yet.
+        this.update();
+    }
+}
+
+class EmptyMenu extends BranchingMenu {
+    title = "Empty menu";
+    options = [];
+
+    constructor(player) {
+        super(player);
+
+        // Annoyingly, the way ES6 classes work, we can't just have super's
+        // constructor call this, because this.options etc won't have been
+        // overridden yet.
+        this.update();
+    }
+}
+
 class ShopMenu extends Menu {
     shop = null;
 
@@ -3884,12 +4023,17 @@ class ShopMenu extends Menu {
         }
     }
     keyDown(keyname) {
-        if(!this.player) return;
         if(keyname === 'u') {
-            if(this.item_i > -1) this.item_i--;
+            this.item_i--;
+            if(this.item_i < -1) {
+                this.item_i = this.shop.items.length - 1;
+            }
             this.update();
         } else if(keyname === 'd') {
-            if(this.item_i < this.shop.items.length - 1) this.item_i++;
+            this.item_i++;
+            if(this.item_i >= this.shop.items.length) {
+                this.item_i = -1;
+            }
             this.update();
         } else if(keyname === 'enter') {
             if(this.item_i === -1) {
@@ -7303,6 +7447,7 @@ var game = new Game(new MapProgress(defaultMap.map));
 })();
 
 canvases.childNodes[0].data = ''; // Remove the 'Loading...' text
+canvases.focus();
 
 game.play();
 
