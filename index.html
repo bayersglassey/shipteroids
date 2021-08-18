@@ -7,7 +7,6 @@ body {
     background-color: #000;
 }
 .canvas {
-    border: solid 1px #0f0;
     display: inline; /* So we can center it with text-align: center */
 }
 .controls {
@@ -23,7 +22,7 @@ body {
 <table>
 <tr>
 <td>
-<div class="controls">
+<div id="controls" class="controls">
     <h2>&#x25BC; CONTROLS &#x25BC;</h2>
     <table class="controls-table">
         <tr><td><b>Left / right</b></td><td>Turn left / right</td></tr>
@@ -39,7 +38,9 @@ body {
 </div>
 </td>
 <td>
-<canvas id="canvas" class="canvas" width=700 height=700 tabindex=-1></canvas>
+<div id="canvases" tabindex=-1>
+Loading...
+</div>
 </td>
 </tr>
 </table>
@@ -91,7 +92,23 @@ body {
 * time you're on a different team so it's more difficult (areas which had
 * been full of allies are now full of enemies).
 *
+*
 * TODO:
+*
+* Fix warping with multiple players!
+* How should warping work?.. once all players have warped, they can
+* proceed?..
+* Or all players need to agree to warp, somehow?..
+* Currently each player has their own fuel. So presumably it's easier
+* to have each player warp individually, as opposed to implementing
+* shared resources.
+* ==> WHAT IF: all players can move around the map independently?..
+* So there is Node.field, which may be null, in which case visiting the
+* node populates it. But if it's already populated (because another player
+* is already there) then you join that field!..
+*
+* With multiple players, it's possible for one to warp while the other
+* has ShopMenu open.
 *
 * Fixing current "Choose Ship" menu, where you can always get a free ship
 * at full health, what if we make it so whenever warping into an area,
@@ -163,6 +180,8 @@ function getFloatParam(name, default_value) {
 }
 
 // debug stuff
+var CANVAS_WIDTH = getIntParam('scw', 700);
+var CANVAS_HEIGHT = getIntParam('sch', 700);
 var DEBUG = getBoolParam('debug');
 var ALL_SHIPS = getBoolParam('all_ships');
 var RICH = getBoolParam('rich');
@@ -176,6 +195,7 @@ var RENDER_BOUNDARY = getBoolParam('render_boundary');
 var HIDE_TEXT = getBoolParam('hide_text');
 var NODAMAGE = getBoolParam('nodamage');
 var VIBRATE = !getBoolParam('novibrate');
+var N_PLAYERS = getIntParam('players', 1);
 
 // physics tweaking stuff
 var VELMUL = getFloatParam('velmul', .7); // multiplier for vel when being added to pos
@@ -229,12 +249,46 @@ var KEY_U = 38;
 var KEY_D = 40;
 var KEY_L = 37;
 var KEY_R = 39;
+var KEY_W = 87;
 var KEY_ENTER = 13;
 var KEY_SPACE = 32;
 var KEY_SHIFT = 16;
-var KEY_ESCAPE = 27;
-var KEY_WARP = 87; // 'W'
 var KEY_TAB = 9;
+
+// keyCode values for player 2
+var KEY_S = 83;
+var KEY_X = 88;
+var KEY_Z = 90;
+var KEY_C = 67;
+var KEY_V = 86;
+var KEY_B = 66;
+var KEY_N = 78;
+var KEY_H = 72;
+var KEY_Y = 89;
+
+// Player keymappings
+var PLAYER1_KEYS = {
+    u:     KEY_U,
+    d:     KEY_D,
+    l:     KEY_L,
+    r:     KEY_R,
+    x:     KEY_SPACE,
+    y:     KEY_SHIFT,
+    warp:  KEY_W,
+    tab:   KEY_TAB,
+    enter: KEY_ENTER,
+};
+var PLAYER2_KEYS = {
+    u:     KEY_S,
+    d:     KEY_X,
+    l:     KEY_Z,
+    r:     KEY_C,
+    x:     KEY_V,
+    y:     KEY_B,
+    warp:  KEY_Y,
+    tab:   KEY_N,
+    enter: KEY_H,
+};
 
 // Gamepad button indices for HTML5 Gamepad.buttons
 // (Assumes the "standard mapping",
@@ -2126,7 +2180,17 @@ class Star extends Sprite {
 class Key {
     /* Represents the state of a key on the keyboard */
 
-    static KEYNAMES = 'udlrxy';
+    static KEYNAMES = [
+        'u',     // up
+        'd',     // down
+        'l',     // left
+        'r',     // right
+        'x',     // weapon/ability #1
+        'y',     // weapon/ability #2
+        'warp',  // warp
+        'tab',   // tab (view map)
+        'enter', // enter (open menu)
+    ];
 
     constructor(name) {
         this.name = name;
@@ -2139,6 +2203,16 @@ class Key {
             keys[keyname] = new this(keyname);
         }
         return keys;
+    }
+    static copyKeys(fromKeys, toKeys) {
+        for(var keyname of this.KEYNAMES) {
+            toKeys[keyname].copy(fromKeys[keyname]);
+        }
+    }
+    static cloneKeys(keys) {
+        var newKeys = this.createKeys();
+        Key.copyKeys(keys, newKeys);
+        return newKeys;
     }
     copy(other) {
         this.isDown = other.isDown;
@@ -2157,6 +2231,13 @@ class Key {
     }
     up() {
         this.isDown = false;
+    }
+    pop() {
+        // Used by code which wants a single, non-repeated action to happen when
+        // you press a key
+        var wasDown = this.wasDown;
+        this.up();
+        return wasDown;
     }
     set(isDown) {
         if(isDown) this.down();
@@ -2284,6 +2365,12 @@ class Entity extends Sprite {
         }
         return null;
     }
+    getCamera() {
+        for(var camera of this.field.game.cameras) {
+            if(camera.getTarget() === this) return camera;
+        }
+        return null;
+    }
     setTeam(team) {
         this.team = team;
         if(team && this.inheritTeamColor) {
@@ -2356,15 +2443,11 @@ class Entity extends Sprite {
     cleanup() {
         var game = this.field.game;
 
-        for(var player of game.players) {
-            if(player.entity !== this) continue;
-            player.unsetEntity();
-        }
+        var player = this.getPlayer();
+        if(player) player.unsetEntity();
 
-        var camera = game.camera;
-        if(camera.target === this) {
-            camera.unsetTarget();
-        }
+        var camera = this.getCamera();
+        if(camera) camera.unsetTarget();
     }
     step() {
         for(var keyname in this.shotClass) {
@@ -2435,6 +2518,14 @@ class Entity extends Sprite {
         }
         if(this.keys.r.wasDown) {
             this.turn(-this.rotspeed);
+        }
+        if(this.keys.warp.wasDown) {
+            if(this.canWarp()) {
+                var player = this.getPlayer();
+                if(player && player.canWarp()) {
+                    player.beginWarp();
+                }
+            }
         }
     }
     handleShotKeys() {
@@ -2816,7 +2907,7 @@ class Entity extends Sprite {
             this.field.game.warp();
         } else {
             // Pop up a menu, so player can choose where to warp to next
-            this.field.game.setMenu(WarpMapMenu);
+            player.setMenu(WarpMapMenu);
             this.die();
         }
     }
@@ -2882,26 +2973,46 @@ class Camera extends FieldParticle {
 
     constructor(field) {
         super(field);
-        this.target = null;
+
+        // At most one of targetEntity and targetPlayer should be non-null.
+        this.targetEntity = null;
+        this.targetPlayer = null;
+
         this.pos.setMidpoint(field.size);
     }
-    setTarget(target) {
+    getTarget() {
+        if(this.targetPlayer) return this.targetPlayer.entity;
+        return this.targetEntity;
+    }
+    setTargetEntity(entity) {
         this.unsetTarget();
-        this.target = target;
-        this.pos.copy(target.pos);
+        this.targetEntity = entity;
+        this.initFromTarget();
+    }
+    setTargetPlayer(player) {
+        this.unsetTarget();
+        this.targetPlayer = player;
+        this.initFromTarget();
     }
     unsetTarget() {
-        if(!this.target) return;
-        this.target = null;
+        this.targetEntity = null;
+        this.targetPlayer = null;
+    }
+    initFromTarget() {
+        // Initialize properties of camera from its target (if any)
+        var target = this.getTarget();
+        if(!target) return;
+        this.pos.copy(target.pos);
     }
     step() {
         this.vel.mul(this.velmul);
 
-        if(this.target) {
+        var target = this.getTarget();
+        if(target) {
             var x0 = this.pos.x;
             var y0 = this.pos.y;
-            var x1 = this.target.pos.x;
-            var y1 = this.target.pos.y;
+            var x1 = target.pos.x;
+            var y1 = target.pos.y;
             this.vel.x += moduloDiff(x0, x1, this.field.size.x)
                 * this.springmul;
             this.vel.y += moduloDiff(y0, y1, this.field.size.y)
@@ -3000,7 +3111,7 @@ class Trinket {
     }
 }
 
-class BasePlayer {
+class Player {
     /* Base class for human and CPU players */
 
     constructor(game) {
@@ -3022,6 +3133,13 @@ class BasePlayer {
         if(!this.entity) return;
         this.entity = null;
     }
+    getCamera() {
+        for(var camera of this.game.cameras) {
+            if(camera.targetPlayer === this) return camera;
+        }
+        if(this.entity) return this.entity.getCamera();
+        return null;
+    }
     createShip(cls) {
         cls = cls || this.shipClass;
         this.shipClass = cls;
@@ -3032,12 +3150,14 @@ class BasePlayer {
         this.setEntity(ship);
         return ship;
     }
+    _stepEntityKeys() {
+        if(this.entity) Key.copyKeys(this.keys, this.entity.keys);
+    }
     step() {
-        if(!this.entity) return;
+        this._stepEntityKeys();
 
         for(var keyname of Key.KEYNAMES) {
             var key = this.keys[keyname];
-            this.entity.keys[keyname].copy(key);
             key.step();
         }
     }
@@ -3052,7 +3172,7 @@ class BasePlayer {
     }
 }
 
-class Player extends BasePlayer {
+class HumanPlayer extends Player {
     /* A human player */
 
     // trinkets: Array of Trinket
@@ -3097,9 +3217,22 @@ class Player extends BasePlayer {
     // gamepad: an HTML5 Gamepad instance, or null
     gamepad = null;
 
-    constructor(game) {
+    constructor(game, canvas) {
         super(game);
+        this.canvas = canvas;
         this.gamepad_keys = Key.createKeys();
+
+        // Slightly hacky, lets us detect keydown events by comparing
+        // this.keys.enter.wasDown against this.prevEnterWasDown (key's
+        // wasDown value from previous step).
+        this.prevEnterWasDown = false;
+
+        this.menu = null;
+    }
+    addCamera() {
+        var camera = this.game.addCamera();
+        camera.setTargetPlayer(this);
+        return camera;
     }
     addFuel(fuel) {
         this.fuel += fuel;
@@ -3154,6 +3287,43 @@ class Player extends BasePlayer {
         if(this.shipHp !== null) ship.setHp(this.shipHp);
         return ship;
     }
+    setMenu(cls) {
+        var previous = this.menu;
+        this.menu = new cls(this);
+        this.menu.previous = previous;
+
+        // Unpress all keys so our ship doesn't fly in circles
+        // or whatever while menu is open
+        if(this.entity) {
+            for(var keyname of Key.KEYNAMES) this.entity.keys[keyname].up();
+        }
+    }
+    unsetMenu() {
+        if(!this.menu) return;
+        this.menu.cleanup();
+        this.menu = this.menu.previous;
+    }
+    _stepEntityKeys() {
+        // Slightly hacky: figure out whether a keydown event happened for our
+        // "enter" key
+        var enterWasPressed = (!this.prevEnterWasDown && this.keys.enter.wasDown);
+        this.prevEnterWasDown = this.keys.enter.wasDown;
+
+        if(this.menu) {
+            if(this.menu instanceof TabMapMenu && !this.keys.tab.isDown) {
+                this.unsetMenu();
+            } else {
+                Key.copyKeys(this.keys, this.menu.keys);
+                this.menu.step();
+            }
+        } else if(enterWasPressed) {
+            this.setMenu(ChooseShipMenu);
+        } else if(this.keys.tab.isDown) {
+            this.setMenu(TabMapMenu);
+        } else {
+            super._stepEntityKeys();
+        }
+    }
     step() {
         super.step();
 
@@ -3204,7 +3374,7 @@ class Player extends BasePlayer {
     }
 }
 
-class CPUPlayer extends BasePlayer {
+class CPUPlayer extends Player {
 
     // The Entity we're currently interested in, or null.
     target = null;
@@ -3295,16 +3465,15 @@ class CPUPlayer extends BasePlayer {
 
 class Game {
 
-    constructor(canvas, progress) {
-        canvas.addEventListener('keydown', this.onKeyDown.bind(this));
-        canvas.addEventListener('keyup', this.onKeyUp.bind(this));
+    constructor(progress) {
+        canvases.addEventListener('keydown', this.onKeyDown.bind(this));
+        canvases.addEventListener('keyup', this.onKeyUp.bind(this));
 
         window.addEventListener('gamepadconnected',
             this.onGamepadActivity.bind(this));
         window.addEventListener('gamepaddisconnected',
             this.onGamepadActivity.bind(this));
 
-        this.canvas = canvas;
         this.intervalId = 0;
         this.players = [];
         this.menu = null;
@@ -3316,7 +3485,7 @@ class Game {
         this.gamepads = null;
 
         /* Hashmap from keyCode values to Key instances belonging to
-        Player instances in this.players */
+        HumanPlayer instances in this.players */
         this.keysByCode = {};
 
         this.progress = progress;
@@ -3337,35 +3506,29 @@ class Game {
         this.field = new Field(this, size);
         this.field.populate(template);
 
-        this.camera = new Camera(this.field);
+        this.cameras = [];
+        for(var player of this.players) player.addCamera();
+    }
+    addCamera() {
+        var camera = new Camera(this.field);
+        this.cameras.push(camera);
+        return camera;
     }
     warp() {
         /* Warp to the next Field */
-
-        this.camera.unsetTarget();
 
         this.field.cleanup();
         this._createField();
 
         if(this.field.shop) {
-            this.setMenu(ShopMenu);
+            for(var player of this.players) player.setMenu(ShopMenu);
             // Do *NOT* "revive" players until they are done shopping!..
             // ShopMenu will handle that when it is closed.
             // That way, players' ships are created with the proper upgrades.
         } else {
-            this.revivePlayers();
+            // "Revive" (create) players' ships after warping.
+            for(var player of this.players) player.reviveShip();
         }
-    }
-    revivePlayers() {
-        // "Revive" (create) players' ships after warping.
-
-        for(var player of this.players) player.reviveShip();
-
-        // HACK: we assume first player is who camera should be targeting.
-        // The reason we have to do this is that finishWarp currently kills
-        // the ship, so game.camera.target gets set to null, so game.warp()
-        // has no way to know what the camera should be pointed at.
-        this.camera.setTarget(this.players[0].entity);
     }
     onKeyDown(event) {
         if(!event.repeat) this.keyDown(event.keyCode);
@@ -3398,55 +3561,19 @@ class Game {
         this.keysByCode[keyCode] = key;
     }
     keyDown(keyCode) {
-        if(this.menu) {
-            this.menu.keyDown(keyCode);
-        } else if(keyCode === KEY_ESCAPE) {
-            this.setMenu(ChooseShipMenu);
-        } else if(keyCode === KEY_TAB) {
-            this.setMenu(TabMapMenu);
-        } else if(keyCode === KEY_WARP) {
-            // HACK!
-            var ship = this.camera.target;
-            if(ship && ship.canWarp()) {
-                var player = ship.getPlayer();
-                if(player && player.canWarp()) {
-                    player.beginWarp();
-                }
-            }
-        } else {
-            var key = this.keysByCode[keyCode];
-            if(key) key.down();
-        }
+        var key = this.keysByCode[keyCode];
+        if(key) key.down();
     }
     keyUp(keyCode) {
-        if(this.menu instanceof TabMapMenu && keyCode === KEY_TAB) {
-            this.unsetMenu();
-        } else if(this.menu) {
-            this.menu.keyUp(keyCode);
-        } else {
-            var key = this.keysByCode[keyCode];
-            if(key) key.up();
-        }
-    }
-    setMenu(cls) {
-        var previous = this.menu;
-        this.menu = new cls(this);
-        this.menu.previous = previous;
-
-        // Unpress all keys so our ship doesn't fly in circles
-        // or whatever while menu is open
-        for(var key of Object.values(this.keysByCode)) key.up();
-    }
-    unsetMenu() {
-        if(!this.menu) return;
-        this.menu.cleanup();
-        this.menu = this.menu.previous;
+        var key = this.keysByCode[keyCode];
+        if(key) key.up();
     }
     addShip(cls) {
         return this.field.addShip(cls);
     }
-    addPlayer() {
-        var player = new Player(this);
+    addPlayer(canvas) {
+        var player = new HumanPlayer(this, canvas);
+        player.addCamera();
         this.players.push(player);
         return player;
     }
@@ -3481,23 +3608,28 @@ class Game {
 
         this.progress.map.step();
         this.field.step();
-        this.camera.step();
-        this.camera.stepPhysics();
+        for(var camera of this.cameras) {
+            camera.step();
+            camera.stepPhysics();
+        }
     }
-    render() {
-        var canvas = this.canvas;
+    renderPlayer(player) {
+        var canvas = player.canvas;
         var ctx = canvas.getContext('2d');
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        this.field.render(canvas, this.camera);
-        if(this.menu) {
-            this.menu.render();
+
+        this.field.render(canvas, player.getCamera());
+
+        if(player.menu) {
+            player.menu.render(canvas);
         } else {
             var text = this.progress.template.text;
             if(text && !HIDE_TEXT) text.render(canvas);
         }
-        this.renderPlayerStats(this.players[0]);
+
+        this.renderPlayerStats(player);
     }
-    renderTextPictures(text, writer, x0, y0, letterWidth, letterHeight, padWidth, padHeight, render_opts) {
+    renderTextPictures(canvas, text, writer, x0, y0, letterWidth, letterHeight, padWidth, padHeight, render_opts) {
         writer = getDefault(writer, blockyWriter);
         x0 = getDefault(x0, 0);
         y0 = getDefault(y0, 0);
@@ -3522,7 +3654,7 @@ class Game {
             // to x and y, because the letters' origins are in their centers,
             // but for rendering text we want to treat their top-left
             // corners as their origins.
-            picture.render(this.canvas,
+            picture.render(canvas,
                 x + radius_x, y + radius_y,
                 0, radius_x, radius_y, render_opts);
 
@@ -3530,7 +3662,7 @@ class Game {
         }
     }
     renderPlayerStats(player) {
-        var canvas = this.canvas;
+        var canvas = player.canvas;
         var ctx = canvas.getContext('2d');
 
         // Arguments to this.renderTextPictures:
@@ -3563,7 +3695,7 @@ class Game {
                 fillStyle: is_colored? 'rgba(255,255,255,.25)':
                     'rgb(255,255,255)',
             };
-            game.renderTextPictures(text, writer, x, y,
+            game.renderTextPictures(canvas, text, writer, x, y,
                 letterWidth, letterHeight, padWidth, padHeight, render_opts);
             x += dx;
         }
@@ -3597,8 +3729,7 @@ class Game {
         renderText(': ' + parseAmount(player.gold));
         newline();
     }
-    renderTitle(title, subtitles) {
-        var canvas = this.canvas;
+    renderTitle(canvas, title, subtitles) {
         var ctx = canvas.getContext('2d');
         ctx.fillStyle = '#fff';
         ctx.textAlign = 'center';
@@ -3621,7 +3752,7 @@ class Game {
         if(TIMING) var t0 = new Date();
         try {
             this.step();
-            this.render();
+            for(var player of this.players) this.renderPlayer(player);
         } catch(ex) {
             // Stop the same error from throwing repeatedly.
             // Don't set this.intervalId to 0 though, for debugging
@@ -3649,8 +3780,15 @@ class Game {
 }
 
 class Menu {
-    constructor(game) {
-        this.game = game;
+    constructor(player) {
+        this.player = player;
+        this.game = player.game;
+
+        // keys: updated by this.player before this.step() is called
+        this.keys = Key.cloneKeys(player.keys);
+
+        // prevKeys: the values of this.keys from previous step
+        this.prevKeys = Key.cloneKeys(player.keys);
 
         // previous: Menu instance or null.
         // (The Menu to return to when this one is closed)
@@ -3658,16 +3796,24 @@ class Menu {
     }
     cleanup() {
     }
-    render() {
+    step() {
+        for(var keyname of Key.KEYNAMES) {
+            var prevKey = this.prevKeys[keyname];
+            var key = this.keys[keyname];
+            if(!prevKey.wasDown && key.wasDown) {
+                this.keyDown(keyname);
+            }
+        }
+
+        Key.copyKeys(this.keys, this.prevKeys);
     }
-    keyDown(keyCode) {
+    keyDown(keyname) {
     }
-    keyUp(keyCode) {
+    render(canvas) {
     }
 }
 
 class ShopMenu extends Menu {
-    player = null;
     shop = null;
 
     // item_i: index into this.shop.items, or -1 for "leave the shop"
@@ -3679,18 +3825,10 @@ class ShopMenu extends Menu {
     // Array of string, set by this.update()
     subtitles = null;
 
-    constructor(game) {
-        super(game);
+    constructor(player) {
+        super(player);
 
-        if(!game.players.length) {
-            // Should never happen... *shifty eyes*
-            throw new Error('No players!');
-        }
-
-        // Hack: choose first player
-        this.player = game.players[0];
-
-        this.shop = game.field.shop;
+        this.shop = this.game.field.shop;
         this.update();
     }
     getSelectedItem() {
@@ -3745,15 +3883,15 @@ class ShopMenu extends Menu {
                 "[Can't buy this: " + cantBuy + ']');
         }
     }
-    keyDown(keyCode) {
+    keyDown(keyname) {
         if(!this.player) return;
-        if(keyCode === KEY_U) {
+        if(keyname === 'u') {
             if(this.item_i > -1) this.item_i--;
             this.update();
-        } else if(keyCode === KEY_D) {
+        } else if(keyname === 'd') {
             if(this.item_i < this.shop.items.length - 1) this.item_i++;
             this.update();
-        } else if(keyCode === KEY_ENTER) {
+        } else if(keyname === 'enter') {
             if(this.item_i === -1) {
                 this.finish();
             } else {
@@ -3763,84 +3901,66 @@ class ShopMenu extends Menu {
                     this.update();
                 }
             }
-        } else if(keyCode === KEY_ESCAPE) {
-            this.finish();
         }
     }
-    render() {
-        this.game.renderTitle(this.title, this.subtitles);
+    render(canvas) {
+        this.game.renderTitle(canvas, this.title, this.subtitles);
     }
     finish() {
         // That is, "leave the shop"
-        this.game.unsetMenu();
+        this.player.unsetMenu();
 
-        if(!this.game.players[0].shipClass) {
+        if(!this.player.shipClass) {
             // HACK: if player hasn't chosen a ship yet, let them do so now.
             // This is just so that you can start the game at a shop node,
             // allowing you to buy upgrades first, *then* pick a ship (and
             // have the upgrades correctly applied to the ships created by
             // ChooseShipMenu).
-            // (It's also a hack that we assume there is only one player.)
-            this.game.setMenu(ChooseShipMenu);
+            this.player.setMenu(ChooseShipMenu);
         } else {
             // When warping to an area with a shop, ShopMenu is opened and
             // players are *not* revived.
             // Now that we are closing ShopMenu, we revive the players.
             // Their ships will be created with any upgrades they bought.
-            this.game.revivePlayers();
+            this.player.reviveShip();
         }
     }
 }
 
 class ChooseShipMenu extends Menu {
-    player = null;
     ship_class_i = 0;
 
     // Array of string, set by this.updateShipClass()
     subtitles = null;
 
-    constructor(game) {
-        super(game);
+    constructor(player) {
+        super(player);
 
-        if(!game.players.length) {
-            // Should never happen... *shifty eyes*
-            throw new Error('No players!');
-        }
-
-        // Hack: choose first player
-        var player = game.players[0];
-        this.setPlayer(player);
-    }
-    setPlayer(player) {
-        this.player = player;
-
-        var ship = player.entity;
         this.ship_class_i = player.shipClass === null?
             0: player.shipClasses.indexOf(player.shipClass);
 
         this.updateShipClass();
     }
-    render() {
-        this.game.renderTitle('Get Ready', this.subtitles);
+    render(canvas) {
+        this.game.renderTitle(canvas, 'Get Ready', this.subtitles);
     }
-    keyDown(keyCode) {
-        if(!this.player) return;
-        if(keyCode === KEY_L) {
+    keyDown(keyname) {
+        if(keyname === 'l') {
             this.ship_class_i = modulo(this.ship_class_i - 1,
-                player.shipClasses.length);
+                this.player.shipClasses.length);
             this.updateShipClass();
-        } else if(keyCode === KEY_R) {
+        } else if(keyname === 'r') {
             this.ship_class_i = modulo(this.ship_class_i + 1,
-                player.shipClasses.length);
+                this.player.shipClasses.length);
             this.updateShipClass();
-        } else if(keyCode === KEY_ENTER) {
-            this.game.unsetMenu();
+        } else if(keyname === 'enter') {
+            this.player.unsetMenu();
         }
     }
     updateShipClass() {
         var old_ship = this.player.entity;
 
-        var cls = player.shipClasses[this.ship_class_i];
+        var cls = this.player.shipClasses[this.ship_class_i];
         var ship = this.player.createShip(cls);
 
         // Point the ship upwards
@@ -3859,10 +3979,11 @@ class ChooseShipMenu extends Menu {
             // to collide with each other...
             this.game.field.removeEntities(this.game.field.ships);
         } else {
-            ship.pos.setMidpoint(this.game.field.size);
+            var i = this.game.players.indexOf(this.player);
+            var n = this.game.players.length;
+            var addx = getRotVariance(i, n) * 12 * RADIUSMUL;
+            ship.pos.setMidpoint(this.game.field.size).addxy(addx);
         }
-
-        this.game.camera.setTarget(ship);
 
         this.subtitles = [
             'Choose your ship',
@@ -3885,11 +4006,12 @@ class MapMenu extends Menu {
     // text: instance of Text, calculated by updateEdge()
     text = null;
 
-    constructor(game) {
-        super(game);
+    constructor(player) {
+        super(player);
 
-        var node = game.progress.node;
-        var edge = game.progress.edge;
+        var progress = player.game.progress;
+        var node = progress.node;
+        var edge = progress.edge;
         var edge_i = edge? node.getEdgeIndex(edge): 0;
         this.setNode(node, edge_i);
     }
@@ -3933,20 +4055,19 @@ class MapMenu extends Menu {
         this.edge_i = getDefault(edge_i, 0);
         this.updateEdge();
     }
-    keyDown(keyCode) {
-        if(keyCode === KEY_L) {
+    keyDown(keyname) {
+        if(keyname === 'l') {
             this.edge_i--;
             this.updateEdge();
-        } else if(keyCode === KEY_R) {
+        } else if(keyname === 'r') {
             this.edge_i++;
             this.updateEdge();
         }
     }
-    render() {
-        var canvas = this.game.canvas;
+    render(canvas) {
         var ctx = canvas.getContext('2d');
 
-        this.text.render(this.game.canvas);
+        this.text.render(canvas);
 
         var progress = this.game.progress;
         var map = progress.map;
@@ -4042,11 +4163,11 @@ class TabMapMenu extends MapMenu {
         super.addControls(lines);
         lines.push('Up        : follow branch');
     }
-    keyDown(keyCode) {
-        if(keyCode === KEY_U) {
+    keyDown(keyname) {
+        if(keyname === 'u') {
             this.setNode(this.edge.getNode1());
         } else {
-            super.keyDown(keyCode);
+            super.keyDown(keyname);
         }
     }
 }
@@ -4058,19 +4179,19 @@ class WarpMapMenu extends MapMenu {
         super.addControls(lines);
         lines.push('Enter     : finish warping');
     }
-    keyDown(keyCode) {
-        if(keyCode === KEY_ENTER) {
+    keyDown(keyname) {
+        if(keyname === 'enter') {
             var progress = this.game.progress;
             progress.setEdge(this.edge);
             progress.proceed();
 
             // We do this before calling game.warp(), because game.warp()
-            // may call game.setMenu(ShopMenu)
-            this.game.unsetMenu();
+            // may call player.setMenu(ShopMenu)
+            this.player.unsetMenu();
 
             this.game.warp();
         } else {
-            super.keyDown(keyCode);
+            super.keyDown(keyname);
         }
     }
 }
@@ -6470,6 +6591,7 @@ class Planet extends Entity {
         super(field);
 
         this.radius = Random.randNumber(50,200);
+
         this.circleFillStyle = this.createFillGradient();
 
         this.pos.setRandomWithin(field.size);
@@ -6480,7 +6602,14 @@ class Planet extends Entity {
         this.rot_vel = Random.randNumber(-.5, .5) * Math.PI / 40;
     }
     createFillGradient() {
-        var canvas = this.field.game.canvas;
+
+        // HACK?! We create a <canvas> for the sole purpose of generating
+        // a CanvasGradient.
+        // And then we use this same CanvasGradient with different canvases?..
+        // it seems to work okay. I can't find any docs on canvas or
+        // CanvasGradient which say it's limited to use with the canvas used
+        // to create it.
+        var canvas = document.createElement('canvas');
         var ctx = canvas.getContext('2d');
 
         var innerPosSpeed = Random.randNumber(this.radius);
@@ -6704,7 +6833,8 @@ var SHIP_CLASSES = new OrderedDict()
 ;
 
 
-var canvas = document.getElementById('canvas');
+var canvases = document.getElementById('canvases');
+var controls = document.getElementById('controls');
 
 var defaultMap = new function() {
     var map = new Map();
@@ -7138,22 +7268,43 @@ var defaultMap = new function() {
         nodes: nodes,
     };
 };
-var game = new Game(canvas, new MapProgress(defaultMap.map));
 
-var player = game.addPlayer();
-game.mapKey(player.keys.u, KEY_U);
-game.mapKey(player.keys.d, KEY_D);
-game.mapKey(player.keys.l, KEY_L);
-game.mapKey(player.keys.r, KEY_R);
-game.mapKey(player.keys.x, KEY_SPACE);
-game.mapKey(player.keys.y, KEY_SHIFT);
+var game = new Game(new MapProgress(defaultMap.map));
 
-if(game.field.shop) game.setMenu(ShopMenu);
-else game.setMenu(ChooseShipMenu);
+(function() {
+    for(var i = 0; i < N_PLAYERS; i++) {
+        var canvas = document.createElement('canvas');
+        canvas.className = 'canvas';
+        canvas.width = CANVAS_WIDTH;
+        canvas.height = CANVAS_HEIGHT;
+        canvas.style.maxWidth = String(Math.floor(100 / N_PLAYERS)) + '%';
+        canvases.appendChild(canvas);
+
+        var player = game.addPlayer(canvas);
+
+        if(game.field.shop) player.setMenu(ShopMenu);
+        else player.setMenu(ChooseShipMenu);
+    }
+
+    function mapKeys(player, keymap) {
+        for(var keyname in keymap) {
+            game.mapKey(player.keys[keyname], keymap[keyname]);
+        }
+    }
+
+    mapKeys(game.players[0], PLAYER1_KEYS);
+
+    if(game.players.length > 1) {
+        // HACKY MULTIPLAYER INTERFACE... just remove the controls :P
+        controls.style.display = 'none';
+
+        mapKeys(game.players[1], PLAYER2_KEYS);
+    }
+})();
+
+canvases.childNodes[0].data = ''; // Remove the 'Loading...' text
 
 game.play();
-canvas.style.border = 'none';
-canvas.focus();
 
 
 </script>
