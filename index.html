@@ -3229,6 +3229,12 @@ class HumanPlayer extends Player {
 
         this.menu = null;
     }
+    getIndex() {
+        // HACK: we assume all players have consistent indices in the
+        // game.players Array.
+        // That's... probably fine?..
+        return this.game.players.indexOf(this);
+    }
     addCamera() {
         var camera = this.game.addCamera();
         camera.setTargetPlayer(this);
@@ -3820,20 +3826,26 @@ class Menu {
     }
 }
 
-class BranchingMenuOption {
-    /* An option of BranchingMenu */
+class MenuOption {
+    /* An option of OptionsMenu */
 
-    constructor(title, submenu_cls, description) {
+    constructor(title, value, description) {
         this.title = title;
-        this.submenu_cls = submenu_cls;
+
+        // The type of value depends on the subclass of OptionsMenu
+        this.value = value;
+
         this.description = getDefault(description, null);
     }
 }
 
-class BranchingMenu extends Menu {
-    /* A menu whose purpose is to list submenus (i.e. branches). */
+class OptionsMenu extends Menu {
+    /* A menu which displays a list of options to be selected. */
 
-    title = "Branching Menu";
+    title = "??? Menu";
+
+    // String displayed for the option to exit this menu
+    finish_text = 'Leave menu';
 
     // Array of string
     description = [];
@@ -3841,7 +3853,7 @@ class BranchingMenu extends Menu {
     // option_i: index into this.options, or -1 for "go back"
     option_i = -1;
 
-    // options: Array of BranchingSubmenuOption
+    // options: Array of MenuOption
     // (to be overridden by subclasses)
     options = null;
 
@@ -3862,9 +3874,10 @@ class BranchingMenu extends Menu {
 
         if(!this.options.length) {
             this.subtitles.push('...no options!');
+            this.subtitles.push('');
         }
 
-        var subtitle = 'Leave menu';
+        var subtitle = this.finish_text;
         if(this.option_i === -1) {
             subtitle = LBRACKET + subtitle + RBRACKET;
         }
@@ -3875,7 +3888,7 @@ class BranchingMenu extends Menu {
         for(var i = 0; i < this.options.length; i++) {
             var option = this.options[i];
 
-            var subtitle = option.title;
+            var subtitle = this.getOptionTitle(option);
             if(option === selected_option) {
                 subtitle = LBRACKET + subtitle + RBRACKET;
             }
@@ -3886,6 +3899,10 @@ class BranchingMenu extends Menu {
             this.subtitles.push('');
             this.subtitles.push(selected_option.description);
         }
+    }
+    getOptionTitle(option) {
+        // May be overridden by subclasses
+        return option.title;
     }
     keyDown(keyname) {
         if(keyname === 'u') {
@@ -3902,18 +3919,32 @@ class BranchingMenu extends Menu {
             this.update();
         } else if(keyname === 'enter') {
             if(this.option_i === -1) {
-                this.player.unsetMenu();
+                this.finish();
             } else {
                 var option = this.getSelectedOption();
-                if(option) {
-                    this.player.setMenu(option.submenu_cls);
-                    this.update();
-                }
+                if(option) this.select(option);
             }
         }
     }
+    select(option) {
+        // To be overridden by subclasses
+        this.update();
+    }
+    finish() {
+        this.player.unsetMenu();
+    }
     render(canvas) {
         this.game.renderTitle(canvas, this.title, this.subtitles);
+    }
+}
+
+class BranchingMenu extends OptionsMenu {
+    /* A menu whose purpose is to list submenus (i.e. branches).
+    NOTE: this.options[i].value should be a subclass of Menu. */
+
+    select(option) {
+        this.player.setMenu(option.value);
+        super.select(option);
     }
 }
 
@@ -3924,8 +3955,8 @@ class MainMenu extends BranchingMenu {
         "which you might want to use",
     ];
     options = [
-        new BranchingMenuOption("Choose ship", ChooseShipMenu),
-        new BranchingMenuOption("Empty menu", EmptyMenu),
+        new MenuOption("Choose ship", ChooseShipMenu),
+        new MenuOption("Set controls", ControlsMenu),
     ];
 
     constructor(player) {
@@ -3938,9 +3969,12 @@ class MainMenu extends BranchingMenu {
     }
 }
 
-class EmptyMenu extends BranchingMenu {
-    title = "Empty menu";
-    options = [];
+class ControlsMenu extends OptionsMenu {
+    /* A menu which allows a player to set their controls. */
+
+    title = "Set controls";
+    options = [
+    ];
 
     constructor(player) {
         super(player);
@@ -3952,107 +3986,63 @@ class EmptyMenu extends BranchingMenu {
     }
 }
 
-class ShopMenu extends Menu {
-    shop = null;
-
-    // item_i: index into this.shop.items, or -1 for "leave the shop"
-    item_i = -1;
-
-    // string, set by this.update()
-    title = null;
-
-    // Array of string, set by this.update()
-    subtitles = null;
+class ShopMenu extends OptionsMenu {
+    finish_text = 'Leave the shop';
 
     constructor(player) {
         super(player);
 
         this.shop = this.game.field.shop;
+        this.title = this.shop.name;
+        this.description = this.shop.description;
+
+        this.options = this.shop.items.map(item =>
+            new MenuOption(item.name, item, item.description));
+
+        // Annoyingly, the way ES6 classes work, we can't just have super's
+        // constructor call this, because this.options etc won't have been
+        // overridden yet.
         this.update();
     }
-    getSelectedItem() {
-        if(!this.shop.items.length) return null;
-        if(this.item_i < 0) return null;
-        return this.shop.items[this.item_i];
-    }
     update() {
-        this.title = this.shop.name;
+        super.update();
 
-        this.subtitles = this.shop.description.slice();
-        this.subtitles.push('');
+        var selected_option = this.getSelectedOption();
 
-        var LBRACKET = '> ';
-        var RBRACKET = ' <';
-
-        if(!this.shop.items.length) {
-            this.subtitles.push('...nothing left to buy!');
-        }
-
-        var subtitle = 'Leave the shop';
-        if(this.item_i === -1) {
-            subtitle = LBRACKET + subtitle + RBRACKET;
-        }
-        this.subtitles.push(subtitle);
-
-        var selected_item = this.getSelectedItem();
-
-        for(var i = 0; i < this.shop.items.length; i++) {
-            var item = this.shop.items[i];
-
-            var subtitle = item.name + ' (' + item.price + ' G)';
-            if(item.bought) {
-                subtitle = '[BOUGHT] ' + subtitle;
-            } else if(item.price > this.player.gold) {
-                subtitle = '[CAN\'T AFFORD] ' + subtitle;
-            } else if(item.cantBuy(this.player)) {
-                subtitle = '[CAN\'T BUY] ' + subtitle;
-            }
-            if(item === selected_item) {
-                subtitle = LBRACKET + subtitle + RBRACKET;
-            }
-            this.subtitles.push(subtitle);
-        }
-
-        if(selected_item) {
-            this.subtitles.push('');
-            this.subtitles.push(selected_item.description);
-
-            var cantBuy = selected_item.cantBuy(this.player);
-            if(cantBuy) this.subtitles.push(
-                "[Can't buy this: " + cantBuy + ']');
-        }
-    }
-    keyDown(keyname) {
-        if(keyname === 'u') {
-            this.item_i--;
-            if(this.item_i < -1) {
-                this.item_i = this.shop.items.length - 1;
-            }
-            this.update();
-        } else if(keyname === 'd') {
-            this.item_i++;
-            if(this.item_i >= this.shop.items.length) {
-                this.item_i = -1;
-            }
-            this.update();
-        } else if(keyname === 'enter') {
-            if(this.item_i === -1) {
-                this.finish();
-            } else {
-                var item = this.getSelectedItem();
-                if(item && !item.cantBuy(this.player)) {
-                    item.buy(this.player);
-                    this.update();
-                }
+        if(selected_option) {
+            var item = selected_option.value;
+            var cantBuy = item.cantBuy(this.player);
+            if(cantBuy) {
+                this.subtitles.push('');
+                this.subtitles.push(
+                    "[Can't buy this: " + cantBuy + ']');
             }
         }
     }
-    render(canvas) {
-        this.game.renderTitle(canvas, this.title, this.subtitles);
+    getOptionTitle(option) {
+        var item = option.value;
+
+        var subtitle = item.name + ' (' + item.price + ' G)';
+        if(item.wasBoughtBy(this.player)) {
+            subtitle = '[BOUGHT] ' + subtitle;
+        } else if(item.price > this.player.gold) {
+            subtitle = '[CAN\'T AFFORD] ' + subtitle;
+        } else if(item.cantBuy(this.player)) {
+            subtitle = '[CAN\'T BUY] ' + subtitle;
+        }
+        return subtitle;
+    }
+    select(option) {
+        var item = option.value;
+        if(item && !item.cantBuy(this.player)) {
+            item.buy(this.player);
+        }
+        super.select(option);
     }
     finish() {
         // That is, "leave the shop"
-        this.player.unsetMenu();
+
+        super.finish();
 
         if(!this.player.shipClass) {
             // HACK: if player hasn't chosen a ship yet, let them do so now.
@@ -4123,7 +4113,7 @@ class ChooseShipMenu extends Menu {
             // to collide with each other...
             this.game.field.removeEntities(this.game.field.ships);
         } else {
-            var i = this.game.players.indexOf(this.player);
+            var i = this.player.getIndex();
             var n = this.game.players.length;
             var addx = getRotVariance(i, n) * 12 * RADIUSMUL;
             ship.pos.setMidpoint(this.game.field.size).addxy(addx);
@@ -6781,7 +6771,11 @@ class ShopItem {
     name = 'Item';
     description = 'An item you can buy in a shop.';
     price = 10;
-    bought = false;
+
+    // boughtBy: Object mapping player indices with game.players (see
+    // HumanPlayer.getIndex) to boolean.
+    // (Whether this item was bought by each player.)
+    boughtBy = {};
 
     cantBuy(player) {
         // To be overridden by subclasses
@@ -6789,7 +6783,7 @@ class ShopItem {
         // a string (to be displayed to player) describing why they *CAN'T*.
         // Don't you dare question my design decisions.
 
-        if(this.bought) {
+        if(this.wasBoughtBy(player)) {
             return 'Already bought!';
         }
 
@@ -6799,13 +6793,16 @@ class ShopItem {
 
         return null;
     }
-    buy() {
+    wasBoughtBy(player) {
+        return Boolean(this.boughtBy[player.getIndex()]);
+    }
+    buy(player) {
         // To be overridden by subclasses
         // We assume this.cantBuy(player) has already been called successfully
         // (without throwing ShopItemBuyError)
 
         player.gold -= this.price;
-        this.bought = true;
+        this.boughtBy[player.getIndex()] = true;
     }
 }
 
