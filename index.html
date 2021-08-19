@@ -23,7 +23,7 @@ body {
 <tr>
 <td>
 <div id="controls" class="controls">
-    <h2>&#x25BC; CONTROLS &#x25BC;</h2>
+    <h2>&#x25BC; DEFAULT CONTROLS &#x25BC;</h2>
     <table class="controls-table">
         <tr><td><b>Left / right</b></td><td>Turn left / right</td></tr>
         <tr><td><b>Up / down</b></td><td>Thrust / reverse</td></tr>
@@ -31,7 +31,7 @@ body {
         <tr><td><b>Shift</b></td><td>Fire weapon / use ability #2</td></tr>
         <tr><td><b>W</b></td><td>Attempt to warp to next area</td></tr>
         <tr><td><b>Tab</b></td><td>Hold to view map</td></tr>
-        <tr><td><b>Escape</b></td><td>Open "Choose Ship" menu</td></tr>
+        <tr><td><b>Enter</b></td><td>Open the menu &amp; make selections</td></tr>
     </table>
     <br>
     If the controls don't seem to work, you may need to click on the game area to focus it.
@@ -294,20 +294,22 @@ var PLAYER2_KEYS = {
 
 // Gamepad button indices for HTML5 Gamepad.buttons
 // (Assumes the "standard mapping",
-// see: https://w3c.github.io/gamepad/#remapping)
+// see: https://w3c.github.io/gamepad/#remapping
+// and in particular: https://w3c.github.io/gamepad/standard_gamepad.svg)
 var GAMEPAD_BUTTONS = {
     12: 'u',
     13: 'd',
     14: 'l',
     15: 'r',
      0: 'u',
-     1: 'u',
      2: 'd',
-     3: 'd',
      5: 'x',
      7: 'x',
      4: 'y',
      6: 'y',
+     8: 'tab',
+     9: 'enter',
+     3: 'warp',
 };
 
 // Axis threshold: value between 0 and 1, past which we
@@ -2243,13 +2245,6 @@ class Key {
     up() {
         this.isDown = false;
     }
-    pop() {
-        // Used by code which wants a single, non-repeated action to happen when
-        // you press a key
-        var wasDown = this.wasDown;
-        this.up();
-        return wasDown;
-    }
     set(isDown) {
         if(isDown) this.down();
         else this.up();
@@ -3161,16 +3156,18 @@ class Player {
         this.setEntity(ship);
         return ship;
     }
-    _stepEntityKeys() {
-        if(this.entity) Key.copyKeys(this.keys, this.entity.keys);
+    _updateEntityKeys(keys) {
+        if(this.entity) Key.copyKeys(keys, this.entity.keys);
     }
-    step() {
-        this._stepEntityKeys();
-
+    _stepKeys() {
         for(var keyname of KEYNAMES) {
             var key = this.keys[keyname];
             key.step();
         }
+    }
+    step() {
+        this._updateEntityKeys(this.keys);
+        this._stepKeys();
     }
     renderEntity(canvas, camera, addx, addy) {
         // Render any extra stuff around our entity (who has just been
@@ -3225,13 +3222,24 @@ class HumanPlayer extends Player {
     shipClasses = ALL_SHIPS? SHIP_CLASSES.getValues():
         [FighterShip, ScoutShip, AssaultShip];
 
+    // gamepad_index: index into navigator.getGamepads(), or -1
+    gamepad_index = -1;
+
     // gamepad: an HTML5 Gamepad instance, or null
+    // (not really a persistent value, rather it's stored onto player at
+    // the start of each step)
     gamepad = null;
 
     constructor(game, canvas) {
         super(game);
         this.canvas = canvas;
+
+        // gamepad_keys: set directly each step based on gamepad state,
+        // as opposed to being manipulated in response to events.
         this.gamepad_keys = Key.createKeys();
+
+        // combined_keys: this.keys unioned with this.gamepad_keys
+        this.combined_keys = Key.createKeys();
 
         // Slightly hacky, lets us detect keydown events by comparing
         // this.keys.enter.wasDown against this.prevEnterWasDown (key's
@@ -3314,6 +3322,9 @@ class HumanPlayer extends Player {
         this.menu = new cls(this);
         this.menu.previous = previous;
 
+        Key.copyKeys(this.combined_keys, this.menu.keys);
+        Key.copyKeys(this.combined_keys, this.menu.prevKeys);
+
         // Unpress all keys so our ship doesn't fly in circles
         // or whatever while menu is open
         if(this.entity) {
@@ -3325,33 +3336,10 @@ class HumanPlayer extends Player {
         this.menu.cleanup();
         this.menu = this.menu.previous;
     }
-    _stepEntityKeys() {
-        // Slightly hacky: figure out whether a keydown event happened for our
-        // "enter" key
-        var enterWasPressed = (!this.prevEnterWasDown && this.keys.enter.wasDown);
-        this.prevEnterWasDown = this.keys.enter.wasDown;
-
-        if(this.menu) {
-            if(this.menu instanceof TabMapMenu && !this.keys.tab.isDown) {
-                this.unsetMenu();
-            } else {
-                Key.copyKeys(this.keys, this.menu.keys);
-                this.menu.step();
-            }
-        } else if(enterWasPressed) {
-            this.setMenu(MainMenu);
-        } else if(this.keys.tab.isDown) {
-            this.setMenu(TabMapMenu);
-        } else {
-            super._stepEntityKeys();
-        }
-    }
     step() {
-        super.step();
-
-        if(!this.entity) return;
-
-        if(this.fuel < WARP_FUEL) this.addFuel(DEFAULT_ADDFUEL);
+        if(this.entity && this.fuel < WARP_FUEL) {
+            this.addFuel(DEFAULT_ADDFUEL);
+        }
 
         if(this.gamepad) {
             // If a gamepad is connected for this player, update
@@ -3366,15 +3354,34 @@ class HumanPlayer extends Player {
         }
 
         for(var keyname of KEYNAMES) {
+            var key = this.keys[keyname];
             var gamepad_key = this.gamepad_keys[keyname];
-
-            // super.step() has already done:
-            //   this.entity.keys[keyname].copy(this.keys[keyname])
-            // ...now we union the gamepad's keypresses onto that.
-
-            this.entity.keys[keyname].union(gamepad_key);
+            this.combined_keys[keyname].copy(key).union(gamepad_key);
             gamepad_key.step();
         }
+
+        // Slightly hacky: figure out whether a keydown event happened for our
+        // "enter" key
+        var enterWentDown = (
+            !this.prevEnterWasDown && this.combined_keys.enter.wasDown);
+        this.prevEnterWasDown = this.combined_keys.enter.wasDown;
+
+        if(this.menu) {
+            if(this.menu instanceof TabMapMenu && !this.combined_keys.tab.isDown) {
+                this.unsetMenu();
+            } else {
+                Key.copyKeys(this.combined_keys, this.menu.keys);
+                this.menu.step();
+            }
+        } else if(enterWentDown) {
+            this.setMenu(MainMenu);
+        } else if(this.combined_keys.tab.isDown) {
+            this.setMenu(TabMapMenu);
+        } else {
+            this._updateEntityKeys(this.combined_keys);
+        }
+
+        this._stepKeys();
     }
     handleGamepadInput() {
         var gamepad = this.gamepad;
@@ -3621,6 +3628,11 @@ class Game {
         var player = new HumanPlayer(this, canvas);
         player.addCamera();
         this.players.push(player);
+
+        // Slight hack: setting this here, instead of HumanPlayer's
+        // constructor, so that getIndex returns correct value
+        player.gamepad_index = player.getIndex();
+
         return player;
     }
     addCPUPlayer() {
@@ -3637,15 +3649,9 @@ class Game {
         // with a connected gamepad.
         if(this.gamepadsConnected) {
             var gamepads = navigator.getGamepads();
-            for(var i = 0; i < gamepads.length; i++) {
-                // HACK: we associate gamepads to players in the order
-                // gamepads are connected, i.e. the first gamepad to be
-                // connected is associated with the first player.
-                // TODO: fix this (whenever we get around to adding some
-                // kind of UI for choosing controls)
-                var player = this.players[i];
-                if(!player) continue;
-                player.gamepad = gamepads[i];
+            for(var player of this.players) {
+                player.gamepad =
+                    getDefault(gamepads[player.gamepad_index], null);
             }
         }
 
@@ -3831,10 +3837,10 @@ class Menu {
         this.game = player.game;
 
         // keys: updated by this.player before this.step() is called
-        this.keys = Key.cloneKeys(player.keys);
+        this.keys = Key.createKeys();
 
         // prevKeys: the values of this.keys from previous step
-        this.prevKeys = Key.cloneKeys(player.keys);
+        this.prevKeys = Key.createKeys();
 
         // previous: Menu instance or null.
         // (The Menu to return to when this one is closed)
@@ -4080,6 +4086,7 @@ class GamepadControlsMenu extends OptionsMenu {
     /* A menu which allows a player to set their controls. */
 
     title = "Set gamepad controls";
+    description = ['(TODO: allow changing behaviour of individual buttons)'];
     options = [
     ];
 
@@ -7027,7 +7034,7 @@ class SecondaryPowerupShopItem extends BasePowerupShopItem {
 }
 
 class ShipShopItem extends ShopItem {
-    description = 'Use ships you\'ve bought in the "Choose Ship" menu (hit Escape).';
+    description = 'Use ships you\'ve bought in the "Choose Ship" menu.';
 
     constructor(cls, price) {
         super();
