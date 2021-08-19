@@ -109,6 +109,8 @@ Loading...
 *
 * With multiple players, it's possible for one to warp while the other
 * has ShopMenu open.
+* And in fact, if the one who has ShopMenu open doesn't have a shipClass
+* assigned, then we hit a null pointer exception. Wheee!
 *
 * Fixing current "Choose Ship" menu, where you can always get a free ship
 * at full health, what if we make it so whenever warping into an area,
@@ -2177,20 +2179,29 @@ class Star extends Sprite {
     trailCamVel = 1;
 }
 
+class KeyInfo {
+    constructor(name, title, description) {
+        this.name = name;
+        this.title = title;
+        this.description = getDefault(description, null);
+    }
+}
+
+var KEYINFOS = [
+    new KeyInfo('u',     'Up'),
+    new KeyInfo('d',     'Down'),
+    new KeyInfo('l',     'Left'),
+    new KeyInfo('r',     'Right'),
+    new KeyInfo('x',     'Weapon/ability #1'),
+    new KeyInfo('y',     'Weapon/ability #2'),
+    new KeyInfo('warp',  'Warp'),
+    new KeyInfo('tab',   'View map'),
+    new KeyInfo('enter', 'Open menu / make selection'),
+];
+var KEYNAMES = KEYINFOS.map(keyinfo => keyinfo.name);
+
 class Key {
     /* Represents the state of a key on the keyboard */
-
-    static KEYNAMES = [
-        'u',     // up
-        'd',     // down
-        'l',     // left
-        'r',     // right
-        'x',     // weapon/ability #1
-        'y',     // weapon/ability #2
-        'warp',  // warp
-        'tab',   // tab (view map)
-        'enter', // enter (open menu)
-    ];
 
     constructor(name) {
         this.name = name;
@@ -2199,13 +2210,13 @@ class Key {
     }
     static createKeys() {
         var keys = {};
-        for(var keyname of this.KEYNAMES) {
+        for(var keyname of KEYNAMES) {
             keys[keyname] = new this(keyname);
         }
         return keys;
     }
     static copyKeys(fromKeys, toKeys) {
-        for(var keyname of this.KEYNAMES) {
+        for(var keyname of KEYNAMES) {
             toKeys[keyname].copy(fromKeys[keyname]);
         }
     }
@@ -2476,7 +2487,7 @@ class Entity extends Sprite {
         }
 
         this.handleKeys();
-        for(var keyname of Key.KEYNAMES) {
+        for(var keyname of KEYNAMES) {
             this.keys[keyname].step();
         }
 
@@ -3156,7 +3167,7 @@ class Player {
     step() {
         this._stepEntityKeys();
 
-        for(var keyname of Key.KEYNAMES) {
+        for(var keyname of KEYNAMES) {
             var key = this.keys[keyname];
             key.step();
         }
@@ -3306,7 +3317,7 @@ class HumanPlayer extends Player {
         // Unpress all keys so our ship doesn't fly in circles
         // or whatever while menu is open
         if(this.entity) {
-            for(var keyname of Key.KEYNAMES) this.entity.keys[keyname].up();
+            for(var keyname of KEYNAMES) this.entity.keys[keyname].up();
         }
     }
     unsetMenu() {
@@ -3348,13 +3359,13 @@ class HumanPlayer extends Player {
             this.handleGamepadInput();
         } else {
             // Reset gamepad keys if no gamepad is connected
-            for(var keyname of Key.KEYNAMES) {
+            for(var keyname of KEYNAMES) {
                 var gamepad_key = this.gamepad_keys[keyname];
                 gamepad_key.up();
             }
         }
 
-        for(var keyname of Key.KEYNAMES) {
+        for(var keyname of KEYNAMES) {
             var gamepad_key = this.gamepad_keys[keyname];
 
             // super.step() has already done:
@@ -3572,6 +3583,28 @@ class Game {
     }
     mapKey(key, keyCode) {
         this.keysByCode[keyCode] = key;
+    }
+    mapKeys(keys, keymap) {
+        for(var keyname in keymap) {
+            this.mapKey(keys[keyname], keymap[keyname]);
+        }
+    }
+    getKeyCode(findKey) {
+        for(var keyCode in this.keysByCode) {
+            if(this.keysByCode[keyCode] === findKey) return keyCode;
+        }
+        return -1;
+    }
+    getKeyByCode(findKeyCode) {
+        for(var keyCode in this.keysByCode) {
+            if(keyCode === findKeyCode) return this.keysByCode[keyCode];
+        }
+        return null;
+    }
+    remapKey(key, keyCode) {
+        var oldKeyCode = this.getKeyCode(key);
+        if(oldKeyCode !== -1) delete this.keysByCode[oldKeyCode];
+        this.mapKey(key, keyCode);
     }
     keyDown(keyCode) {
         var key = this.keysByCode[keyCode];
@@ -3810,7 +3843,7 @@ class Menu {
     cleanup() {
     }
     step() {
-        for(var keyname of Key.KEYNAMES) {
+        for(var keyname of KEYNAMES) {
             var prevKey = this.prevKeys[keyname];
             var key = this.keys[keyname];
             if(!prevKey.wasDown && key.wasDown) {
@@ -3860,6 +3893,13 @@ class OptionsMenu extends Menu {
     // Array of string, set by this.update()
     subtitles = null;
 
+    initOptions() {
+        // To be called at the end of subclasses' constructors,
+        // after they've set this.options.
+
+        if(this.options.length) this.option_i = 0;
+        this.update();
+    }
     getSelectedOption() {
         if(!this.options.length) return null;
         if(this.option_i < 0) return null;
@@ -3877,12 +3917,6 @@ class OptionsMenu extends Menu {
             this.subtitles.push('');
         }
 
-        var subtitle = this.finish_text;
-        if(this.option_i === -1) {
-            subtitle = LBRACKET + subtitle + RBRACKET;
-        }
-        this.subtitles.push(subtitle);
-
         var selected_option = this.getSelectedOption();
 
         for(var i = 0; i < this.options.length; i++) {
@@ -3894,6 +3928,16 @@ class OptionsMenu extends Menu {
             }
             this.subtitles.push(subtitle);
         }
+
+        var MDASH = '\u2014';
+        var HLINE = MDASH.repeat(20);
+        this.subtitles.push(HLINE);
+
+        var subtitle = this.finish_text;
+        if(this.option_i === -1) {
+            subtitle = LBRACKET + subtitle + RBRACKET;
+        }
+        this.subtitles.push(subtitle);
 
         if(selected_option && selected_option.decription) {
             this.subtitles.push('');
@@ -3950,39 +3994,98 @@ class BranchingMenu extends OptionsMenu {
 
 class MainMenu extends BranchingMenu {
     title = "Main menu";
-    description = [
-        "The primary menu",
-        "which you might want to use",
-    ];
+
     options = [
         new MenuOption("Choose ship", ChooseShipMenu),
-        new MenuOption("Set controls", ControlsMenu),
+        new MenuOption("Set keyboard controls", KeyboardControlsMenu),
+        new MenuOption("Set gamepad controls", GamepadControlsMenu),
     ];
 
     constructor(player) {
         super(player);
-
-        // Annoyingly, the way ES6 classes work, we can't just have super's
-        // constructor call this, because this.options etc won't have been
-        // overridden yet.
-        this.update();
+        this.initOptions();
     }
 }
 
-class ControlsMenu extends OptionsMenu {
+class KeyboardControlsMenu extends OptionsMenu {
     /* A menu which allows a player to set their controls. */
 
-    title = "Set controls";
+    title = "Set keyboard controls";
+
+    // waitingForKey: Key or null.
+    // If non-null, should be one of the Key instances in this.player.keys,
+    // and we are waiting for player to press a key so that we can remap
+    // its keycode.
+    waitingForKey = null;
+
+    constructor(player) {
+        super(player);
+
+        this.options = KEYINFOS.map(keyinfo =>
+            new MenuOption(keyinfo.title, keyinfo, keyinfo.description));
+
+        this.initOptions();
+    }
+    getOptionTitle(option) {
+        var subtitle = option.title;
+
+        var keyinfo = option.value;
+        var key = this.player.keys[keyinfo.name];
+        var keyCode = this.game.getKeyCode(key);
+        if(key === this.waitingForKey) {
+            subtitle += ' [ ...please press a key... ]';
+        } else if(keyCode !== -1) {
+            subtitle += ' [' + keyCode + ']';
+        } else {
+            subtitle += ' [ unmapped ]';
+        }
+
+        return subtitle;
+    }
+    select(option) {
+        var keyinfo = option.value;
+        var key = this.player.keys[keyinfo.name];
+
+        this.waitingForKey = key;
+
+        if(this.game.hasOwnProperty('keyDown')) {
+            // If game.keyDown is already monkey-patched, that should mean
+            // another player was in the process of setting their keys, and
+            // we somehow selected one of our keys (probably with a gamepad).
+            // So we call the monkey-patch, passing it a magic "unmapped"
+            // keyCode value, and causing the monkey-patch to remove itself.
+            this.game.keyDown(-1);
+        }
+
+        // Delicious HACK: we use Javascript magic to monkey-patch the game's
+        // global keydown handler. Wheeeeee
+        var menu = this;
+        var game = this.game;
+        game.keyDown = function(keyCode) {
+            game.remapKey(key, keyCode);
+
+            // Delete this monkey-patch, so that subsequent references to
+            // game.keyDown are resolved to the class method (Game.keyDown)
+            delete game.keyDown;
+
+            menu.waitingForKey = null;
+            menu.update();
+        }
+
+        super.select(option);
+    }
+}
+
+class GamepadControlsMenu extends OptionsMenu {
+    /* A menu which allows a player to set their controls. */
+
+    title = "Set gamepad controls";
     options = [
     ];
 
     constructor(player) {
         super(player);
-
-        // Annoyingly, the way ES6 classes work, we can't just have super's
-        // constructor call this, because this.options etc won't have been
-        // overridden yet.
-        this.update();
+        this.initOptions();
     }
 }
 
@@ -3999,10 +4102,7 @@ class ShopMenu extends OptionsMenu {
         this.options = this.shop.items.map(item =>
             new MenuOption(item.name, item, item.description));
 
-        // Annoyingly, the way ES6 classes work, we can't just have super's
-        // constructor call this, because this.options etc won't have been
-        // overridden yet.
-        this.update();
+        this.initOptions();
     }
     update() {
         super.update();
@@ -4119,11 +4219,18 @@ class ChooseShipMenu extends Menu {
             ship.pos.setMidpoint(this.game.field.size).addxy(addx);
         }
 
-        this.subtitles = [
-            'Choose your ship',
-            '(Left/right arrow keys + Enter)',
-            '[' + cls.name + ']',
-        ];
+        this.subtitles = [];
+        this.subtitles.push('Choose your ship');
+        switch(this.player.getIndex()) {
+            case 0:
+                this.subtitles.push('(Left/right arrow keys + Enter)');
+                break;
+            case 1:
+                this.subtitles.push('(Z/C keys + H)');
+                break;
+            default: break;
+        }
+        this.subtitles.push('[' + cls.name + ']');
     }
 }
 
@@ -7427,19 +7534,13 @@ var game = new Game(new MapProgress(defaultMap.map));
         else player.setMenu(ChooseShipMenu);
     }
 
-    function mapKeys(player, keymap) {
-        for(var keyname in keymap) {
-            game.mapKey(player.keys[keyname], keymap[keyname]);
-        }
-    }
-
-    mapKeys(game.players[0], PLAYER1_KEYS);
+    game.mapKeys(game.players[0].keys, PLAYER1_KEYS);
 
     if(game.players.length > 1) {
         // HACKY MULTIPLAYER INTERFACE... just remove the controls :P
         controls.style.display = 'none';
 
-        mapKeys(game.players[1], PLAYER2_KEYS);
+        game.mapKeys(game.players[1].keys, PLAYER2_KEYS);
     }
 })();
 
