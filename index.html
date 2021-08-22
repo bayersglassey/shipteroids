@@ -95,23 +95,6 @@ Loading...
 *
 * TODO:
 *
-* Fix warping with multiple players!
-* How should warping work?.. once all players have warped, they can
-* proceed?..
-* Or all players need to agree to warp, somehow?..
-* Currently each player has their own fuel. So presumably it's easier
-* to have each player warp individually, as opposed to implementing
-* shared resources.
-* ==> WHAT IF: all players can move around the map independently?..
-* So there is Node.field, which may be null, in which case visiting the
-* node populates it. But if it's already populated (because another player
-* is already there) then you join that field!..
-*
-* With multiple players, it's possible for one to warp while the other
-* has ShopMenu open.
-* And in fact, if the one who has ShopMenu open doesn't have a shipClass
-* assigned, then we hit a null pointer exception. Wheee!
-*
 * Fixing current "Choose Ship" menu, where you can always get a free ship
 * at full health, what if we make it so whenever warping into an area,
 * you can choose a ship to use?
@@ -134,13 +117,8 @@ Loading...
 *
 * Saving/loading
 *
-* Multiplayer
-*
 * When a Field is populated, we should make sure things don't overlap,
 * otherwise everything will start immediately rocketing around the screen.
-*
-* Should be able to aim camera at a player (camera.targetPlayer) so we don't
-* need maps to call setTarget explicitly...
 *
 * Better instructions, "story"...
 * Collectables which affect the map. ("switches"? "keys"?)
@@ -396,6 +374,11 @@ function linear(x0, x1, n) {
 
 function getDefault(value, default_value) {
     return value === undefined? default_value: value;
+}
+
+function removeArrayElem(arr, elem) {
+    var i = arr.indexOf(elem);
+    if(i >= 0) arr.splice(i, 1);
 }
 
 function range(a, b) {
@@ -1098,6 +1081,8 @@ class MapNode extends Particle {
         this.edges = [];
         this.backedges = [];
 
+        this.field = null;
+
         // radius, pos, vel: don't affect anything, only used for rendering the
         // Map and its nodes/edges as a graph with "springy physics"
         // (also apparently known as a "force-directed graph")
@@ -1108,6 +1093,15 @@ class MapNode extends Particle {
 
         this.strokeStyle = Random.randColor(80, 256, .75);
         this.fillStyle = 'rgba(255,255,255,.25)';
+    }
+    unsetField() {
+        this.field = null;
+    }
+    setField(field) {
+        this.field = field;
+    }
+    getField() {
+        return this.field;
     }
     addEdge(other, len) {
         var edge = new MapEdge(this, other, len);
@@ -1168,6 +1162,18 @@ class DirectedMapEdge {
     constructor(edge, isBackEdge) {
         this.edge = edge;
         this.isBackEdge = isBackEdge;
+
+        // Object mapping integers (0 < i < this.len) to Fields
+        this.fields = {};
+    }
+    unsetField(i) {
+        delete this.fields[i];
+    }
+    setField(i, field) {
+        this.fields[i] = field;
+    }
+    getField(i) {
+        return getDefault(this.fields[i], null);
     }
     getReversed() {
         return this.isBackEdge? this.edge.forwardEdge: this.edge.backEdge;
@@ -1187,7 +1193,10 @@ class Map {
     /* A directed graph of MapNodes and MapEdges, each of which have an
     associated FieldTemplate. */
 
+    // Array of MapNode
     nodes = [];
+
+    // MapNode or null
     startNode = null;
 
     getStartNode() {
@@ -1234,10 +1243,6 @@ class MapProgress {
     For instance, the MapNode at which they are currently located, and
     the MapEdge along which they are travelling (if applicable). */
 
-    map = null;
-    node = null;
-    edge = null;
-
     // edgeDist: how far we've travelled along this.edge.
     // It should always be the case that:
     //
@@ -1251,7 +1256,13 @@ class MapProgress {
         if(!map.nodes.length) throw new Error('Map has no nodes');
 
         this.map = map;
+
+        // MapNode
         this.node = getDefault(startNode, map.getStartNode());
+
+        // DirectedMapEdge
+        this.edge = null;
+
         this.updateTemplate();
     }
     getPos() {
@@ -1264,10 +1275,6 @@ class MapProgress {
             return this.node.pos;
         }
     }
-    canProceed() {
-        if(this.edge) return true;
-        return this.node.numEdges() <= 1;
-    }
     setEdge(edge) {
         if(this.edge) {
             throw new Error("Can't set edge yet, it's already set");
@@ -1278,7 +1285,12 @@ class MapProgress {
         }
         this.edge = edge;
         this.edgeDist = 0;
+        this.proceed();
         this.updateTemplate();
+    }
+    canProceed() {
+        if(this.edge) return true;
+        return this.node.numEdges() <= 1;
     }
     proceed() {
         if(!this.canProceed()) {
@@ -1296,13 +1308,24 @@ class MapProgress {
         } else if(this.node.numEdges() === 1) {
             var edge = this.node.getEdge(0);
             this.setEdge(edge);
-            this.proceed();
         } else {
             console.log(this.node);
             throw new Error(
                 "Node doesn't have exactly 1 edge! "
                 + "It has " + this.node.numEdges());
         }
+    }
+    unsetField(field) {
+        if(this.edge) this.edge.unsetField(this.edgeDist);
+        else this.node.unsetField();
+    }
+    setField(field) {
+        if(this.edge) this.edge.setField(this.edgeDist, field);
+        else this.node.setField(field);
+    }
+    getField() {
+        if(this.edge) return this.edge.getField(this.edgeDist);
+        else return this.node.getField();
     }
     updateTemplate() {
         if(!this.edge) {
@@ -1340,6 +1363,10 @@ class Field {
 
         this.template = null;
         this.shop = null;
+
+        this.cpus = [];
+        this.players = [];
+        this.cameras = [];
 
         /* Create a canvas for rendering this Field.
         This canvas is never attached to a parent element, we only
@@ -1405,7 +1432,7 @@ class Field {
             var ship_template = template.ships.randValue();
             if(!ship_template) continue;
 
-            var player = this.game.addCPUPlayer();
+            var player = this.addCPUPlayer();
             player.setTeam(ship_template.team);
             player.createShip(ship_template.cls);
         }
@@ -1414,6 +1441,26 @@ class Field {
         if(template.rocksText) {
             this.addRocksText(template.rocksText);
         }
+    }
+    addPlayer(player) {
+        this.players.push(player);
+    }
+    removePlayer(player) {
+        removeArrayElem(this.players, player);
+        this.removeCamera(player.camera);
+    }
+    addCPUPlayer() {
+        var player = new CPUPlayer(this.game, this);
+        this.cpus.push(player);
+        return player;
+    }
+    addCamera() {
+        var camera = new Camera(this);
+        this.cameras.push(camera);
+        return camera;
+    }
+    removeCamera(camera) {
+        removeArrayElem(this.cameras, camera);
     }
     addEntityArray() {
         // Create an Array used to store Entity instances
@@ -1464,6 +1511,7 @@ class Field {
         return entity;
     }
     addPendingEntities(entityArray) {
+        if(!entityArray.pending.length) return;
         for(var entity of entityArray.pending) entityArray.push(entity);
         entityArray.pending.length = 0;
     }
@@ -2363,17 +2411,11 @@ class Entity extends Sprite {
     getPlayer(includeCPUs) {
         includeCPUs = getDefault(includeCPUs, false);
 
-        for(var player of this.field.game.players) {
+        for(var player of this.field.players) {
             if(player.entity === this) return player;
         }
-        if(includeCPUs) for(var player of this.field.game.cpus) {
+        if(includeCPUs) for(var player of this.field.cpus) {
             if(player.entity === this) return player;
-        }
-        return null;
-    }
-    getCamera() {
-        for(var camera of this.field.game.cameras) {
-            if(camera.getTarget() === this) return camera;
         }
         return null;
     }
@@ -2447,13 +2489,6 @@ class Entity extends Sprite {
         this._shouldRemove = true;
     }
     cleanup() {
-        var game = this.field.game;
-
-        var player = this.getPlayer();
-        if(player) player.unsetEntity();
-
-        var camera = this.getCamera();
-        if(camera) camera.unsetTarget();
     }
     step() {
         for(var keyname in this.shotClass) {
@@ -2906,16 +2941,15 @@ class Entity extends Sprite {
         player.useFuel(WARP_FUEL);
         player.shipHp = this.hp;
 
-        var progress = this.field.game.progress;
-        if(progress.canProceed()) {
+        if(player.canWarpImmediately()) {
             // Immediately warp to next area
-            progress.proceed();
-            this.field.game.warp();
+            player.warp();
         } else {
             // Pop up a menu, so player can choose where to warp to next
             player.setMenu(WarpMapMenu);
-            this.die();
         }
+
+        this.die();
     }
     render(canvas, camera) {
         var fade = 1;
@@ -2977,48 +3011,38 @@ class Camera extends FieldParticle {
     velmul = .7;
     springmul = .1;
 
-    constructor(field) {
+    // target: Entity or null
+    target = null;
+
+    constructor(field, target) {
         super(field);
 
-        // At most one of targetEntity and targetPlayer should be non-null.
-        this.targetEntity = null;
-        this.targetPlayer = null;
+        target = getDefault(target, null);
 
-        this.pos.setMidpoint(field.size);
+        if(target) this.setTarget(target);
+        else this.pos.setMidpoint(field.size);
     }
-    getTarget() {
-        if(this.targetPlayer) return this.targetPlayer.entity;
-        return this.targetEntity;
-    }
-    setTargetEntity(entity) {
-        this.unsetTarget();
-        this.targetEntity = entity;
-        this.initFromTarget();
-    }
-    setTargetPlayer(player) {
-        this.unsetTarget();
-        this.targetPlayer = player;
+    setTarget(target) {
+        this.target = target;
         this.initFromTarget();
     }
     unsetTarget() {
-        this.targetEntity = null;
-        this.targetPlayer = null;
+        this.target = null;
     }
     initFromTarget() {
-        // Initialize properties of camera from its target (if any)
-        var target = this.getTarget();
-        if(!target) return;
-        this.pos.copy(target.pos);
+        if(!this.target) return;
+        this.pos.copy(this.target.pos);
     }
     step() {
         this.vel.mul(this.velmul);
 
-        var target = this.getTarget();
-        if(target) {
+        if(this.target && this.target.removed) this.unsetTarget();
+
+        if(this.target) {
             var x0 = this.pos.x;
             var y0 = this.pos.y;
-            var x1 = target.pos.x;
-            var y1 = target.pos.y;
+            var x1 = this.target.pos.x;
+            var y1 = this.target.pos.y;
             this.vel.x += moduloDiff(x0, x1, this.field.size.x)
                 * this.springmul;
             this.vel.y += moduloDiff(y0, y1, this.field.size.y)
@@ -3120,6 +3144,8 @@ class Trinket {
 class Player {
     /* Base class for human and CPU players */
 
+    shipClass = null;
+
     constructor(game) {
         this.game = game;
         this.entity = null;
@@ -3139,22 +3165,23 @@ class Player {
         if(!this.entity) return;
         this.entity = null;
     }
-    getCamera() {
-        for(var camera of this.game.cameras) {
-            if(camera.targetPlayer === this) return camera;
-        }
-        if(this.entity) return this.entity.getCamera();
-        return null;
+    getField() {
+        throw new Error('Subclasses should override this method');
     }
     createShip(cls) {
         cls = cls || this.shipClass;
         this.shipClass = cls;
 
-        var ship = this.game.addShip(cls);
-        ship.pos.setRandomWithin(this.game.field.size);
+        var field = this.getField();
+
+        var ship = field.addShip(cls);
+        ship.pos.setRandomWithin(field.size);
         ship.rot = Random.randRotation();
         this.setEntity(ship);
         return ship;
+    }
+    _beforeStep() {
+        if(this.entity && this.entity.removed) this.entity = null;
     }
     _updateEntityKeys(keys) {
         if(this.entity) Key.copyKeys(keys, this.entity.keys);
@@ -3166,6 +3193,7 @@ class Player {
         }
     }
     step() {
+        this._beforeStep();
         this._updateEntityKeys(this.keys);
         this._stepKeys();
     }
@@ -3185,8 +3213,6 @@ class HumanPlayer extends Player {
 
     // trinkets: Array of Trinket
     trinkets = [];
-
-    shipClass = null;
 
     // shipHp: saved between areas when warping.
     // MAYBE TODO: make a new class, StuffToSave or whatever, so we can
@@ -3209,7 +3235,7 @@ class HumanPlayer extends Player {
 
     // (x|y)ShotLevel: integer powerup level for the indicated shot
     // ('x' or 'y').
-    // Translates into Shotprops.level.
+    // Is used to set Shotprops.level.
     xShotLevel = X_SHOT_LEVEL;
     yShotLevel = Y_SHOT_LEVEL;
 
@@ -3230,9 +3256,19 @@ class HumanPlayer extends Player {
     // the start of each step)
     gamepad = null;
 
-    constructor(game, canvas) {
+    // Slightly hacky, lets us detect keydown events by comparing
+    // this.keys.enter.wasDown against this.prevEnterWasDown (key's
+    // wasDown value from previous step).
+    prevEnterWasDown = false;
+
+    menu = null;
+
+    camera = null;
+
+    constructor(game, canvas, progress) {
         super(game);
         this.canvas = canvas;
+        this.progress = progress;
 
         // gamepad_keys: set directly each step based on gamepad state,
         // as opposed to being manipulated in response to events.
@@ -3241,23 +3277,54 @@ class HumanPlayer extends Player {
         // combined_keys: this.keys unioned with this.gamepad_keys
         this.combined_keys = Key.createKeys();
 
-        // Slightly hacky, lets us detect keydown events by comparing
-        // this.keys.enter.wasDown against this.prevEnterWasDown (key's
-        // wasDown value from previous step).
-        this.prevEnterWasDown = false;
+        this._getOrCreateField();
+    }
+    _removeFromField() {
+        /* Removes this player from their current field (if any) */
 
-        this.menu = null;
+        var field = this.progress.getField();
+        if(!field) return;
+
+        field.removePlayer(this);
+        if(!field.players.length) {
+            // If we were the last player in field, remove the field from the map
+            this.progress.unsetField();
+        }
+    }
+    _getOrCreateField() {
+        /* Finds or creates the field for player.progress, and adds player
+        to it. */
+
+        var field = this.progress.getField();
+        if(!field) {
+            var template = this.progress.template;
+            var size = template.getSize();
+
+            field = new Field(this.game, size);
+            field.populate(template);
+
+            // add field to game.fields *next* step -- not *this* step,
+            // because we're probably iterating over game.fields right now!
+            this.game.pendingFields.push(field);
+
+            // Store field in this.progress.map
+            this.progress.setField(field);
+        }
+
+        this.camera = field.addCamera();
+
+        field.addPlayer(this);
+        return field;
+    }
+    getField() {
+        /* Overrides Player.getField */
+        return this.progress.getField();
     }
     getIndex() {
         // HACK: we assume all players have consistent indices in the
         // game.players Array.
         // That's... probably fine?..
         return this.game.players.indexOf(this);
-    }
-    addCamera() {
-        var camera = this.game.addCamera();
-        camera.setTargetPlayer(this);
-        return camera;
     }
     addFuel(fuel) {
         this.fuel += fuel;
@@ -3281,9 +3348,38 @@ class HumanPlayer extends Player {
     beginWarp() {
         this.entity.beginWarp();
     }
+    canWarpImmediately() {
+        return this.progress.canProceed();
+    }
+    warp(edge) {
+        /* Warp to the next Field */
+
+        edge = getDefault(edge, null);
+
+        this._removeFromField();
+        if(edge) {
+            // Proceed directly to given edge
+            this.progress.setEdge(edge);
+        } else {
+            // Proceed to next field
+            this.progress.proceed();
+        }
+        var field = this._getOrCreateField();
+
+        if(field.shop) {
+            // Do *NOT* "revive" player until they are done shopping!..
+            // ShopMenu will handle that when it is closed.
+            // That way, player's ship is created with the proper upgrades.
+            this.setMenu(ShopMenu);
+        } else {
+            // "Revive" (create) player's ship after warping.
+            this.reviveShip();
+        }
+    }
     createShip(cls) {
         var ship = super.createShip(cls);
         this.addShipBuffs(ship);
+        this.camera.setTarget(ship);
         return ship;
     }
     addShipBuffs(ship) {
@@ -3311,10 +3407,6 @@ class HumanPlayer extends Player {
         var ship = this.createShip();
         if(this.shipHp !== null) ship.setHp(this.shipHp);
 
-        // Attempt to center our camera on our ship
-        var camera = this.getCamera();
-        if(camera) camera.initFromTarget();
-
         return ship;
     }
     setMenu(cls) {
@@ -3337,6 +3429,8 @@ class HumanPlayer extends Player {
         this.menu = this.menu.previous;
     }
     step() {
+        this._beforeStep();
+
         if(this.entity && this.fuel < WARP_FUEL) {
             this.addFuel(DEFAULT_ADDFUEL);
         }
@@ -3408,14 +3502,20 @@ class CPUPlayer extends Player {
     // The Entity we're currently interested in, or null.
     target = null;
 
-    constructor(game) {
+    constructor(game, field) {
         super(game);
+
+        this.field = field;
 
         // Distance past which we lose interest in our target
         this.max_target_dist = Random.randNumber(150, 300) * RADIUSMUL;
 
         // fear_hp_percent: hp below which we fear this.target
         this.fear_hp_percent = Random.randNumber(.15, .9);
+    }
+    getField() {
+        /* Overrides Player.getField */
+        return this.field;
     }
     getFearHp() {
         return this.fear_hp_percent * this.entity.maxhp;
@@ -3430,14 +3530,12 @@ class CPUPlayer extends Player {
             - this.entity.radius - this.target.radius);
     }
     step() {
+        this._beforeStep();
 
+        if(this.target && this.target.removed) this.target = null;
         if(this.entity && this.target) {
-            if(this.target.removed) {
-                this.target = null;
-            } else {
-                var targetDist = this.getTargetDist();
-                if(targetDist > this.max_target_dist) this.target = null;
-            }
+            var targetDist = this.getTargetDist();
+            if(targetDist > this.max_target_dist) this.target = null;
         }
 
         // Press/release keys
@@ -3494,7 +3592,9 @@ class CPUPlayer extends Player {
 
 class Game {
 
-    constructor(progress) {
+    constructor(map) {
+        this.map = map;
+
         canvases.addEventListener('keydown', this.onKeyDown.bind(this));
         canvases.addEventListener('keyup', this.onKeyUp.bind(this));
 
@@ -3505,7 +3605,9 @@ class Game {
 
         this.intervalId = 0;
         this.players = [];
-        this.menu = null;
+
+        this.fields = [];
+        this.pendingFields = [];
 
         // Whether to bother polling for gamepads
         this.gamepadsConnected = false;
@@ -3517,49 +3619,7 @@ class Game {
         HumanPlayer instances in this.players */
         this.keysByCode = {};
 
-        this.progress = progress;
-        this._createField();
-    }
-    _createField() {
-        /* Create this.field and related things */
-
-        // NOTE: need to set this.cpus before calling the Field constructor
-        this.cpus = [];
-
-        var template = this.progress.template;
-        var size = template.getSize();
-
-        // NOTE: field.populate needs to be a separate method from
-        // field.constructor, so that field.populate can rely on
-        // field.game.field being set.
-        this.field = new Field(this, size);
-        this.field.populate(template);
-
-        this.cameras = [];
-        for(var player of this.players) {
-            var camera = player.addCamera();
-        }
-    }
-    addCamera() {
-        var camera = new Camera(this.field);
-        this.cameras.push(camera);
-        return camera;
-    }
-    warp() {
-        /* Warp to the next Field */
-
-        this.field.cleanup();
-        this._createField();
-
-        if(this.field.shop) {
-            for(var player of this.players) player.setMenu(ShopMenu);
-            // Do *NOT* "revive" players until they are done shopping!..
-            // ShopMenu will handle that when it is closed.
-            // That way, players' ships are created with the proper upgrades.
-        } else {
-            // "Revive" (create) players' ships after warping.
-            for(var player of this.players) player.reviveShip();
-        }
+        this.tick = 0;
     }
     onKeyDown(event) {
         if(!event.repeat) this.keyDown(event.keyCode);
@@ -3621,23 +3681,16 @@ class Game {
         var key = this.keysByCode[keyCode];
         if(key) key.up();
     }
-    addShip(cls) {
-        return this.field.addShip(cls);
-    }
-    addPlayer(canvas) {
-        var player = new HumanPlayer(this, canvas);
-        player.addCamera();
+    addPlayer(canvas, progress) {
+        if(!progress) progress = new MapProgress(this.map);
+
+        var player = new HumanPlayer(this, canvas, progress);
         this.players.push(player);
 
         // Slight hack: setting this here, instead of HumanPlayer's
         // constructor, so that getIndex returns correct value
         player.gamepad_index = player.getIndex();
 
-        return player;
-    }
-    addCPUPlayer() {
-        var player = new CPUPlayer(this);
-        this.cpus.push(player);
         return player;
     }
     step() {
@@ -3655,27 +3708,49 @@ class Game {
             }
         }
 
-        for(var player of this.players) player.step();
-        for(var player of this.cpus) player.step();
+        this.map.step();
 
-        this.progress.map.step();
-        this.field.step();
-        for(var camera of this.cameras) {
-            camera.step();
-            camera.stepPhysics();
+        for(var player of this.players) player.step();
+
+        if(this.pendingFields.length) {
+            for(var field of this.pendingFields) this.fields.push(field);
+            this.pendingFields.length = 0;
         }
+
+        for(var i = 0; i < this.fields.length; i++) {
+            var field = this.fields[i];
+            for(var player of field.cpus) player.step();
+
+            field.step();
+            if(!field.players.length) {
+                // Remove fields which have no remaining references to them
+                // (i.e. all players have warped out)
+                field.cleanup();
+                removeArrayElem(this.fields, field);
+                i--;
+                continue;
+            }
+
+            for(var camera of field.cameras) {
+                camera.step();
+                camera.stepPhysics();
+            }
+        }
+
+        this.tick++;
     }
     renderPlayer(player) {
         var canvas = player.canvas;
         var ctx = canvas.getContext('2d');
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        this.field.render(canvas, player.getCamera());
+        var field = player.getField();
+        field.render(canvas, player.camera);
 
         if(player.menu) {
             player.menu.render(canvas);
         } else {
-            var text = this.progress.template.text;
+            var text = player.progress.template.text;
             if(text && !HIDE_TEXT) text.render(canvas);
         }
 
@@ -4102,7 +4177,8 @@ class ShopMenu extends OptionsMenu {
     constructor(player) {
         super(player);
 
-        this.shop = this.game.field.shop;
+        var field = this.player.getField();
+        this.shop = field.shop;
         this.title = this.shop.name;
         this.description = this.shop.description;
 
@@ -4207,23 +4283,30 @@ class ChooseShipMenu extends Menu {
         // Point the ship upwards
         ship.rot = Math.PI / 2;
 
+        var field = this.player.getField();
+
         if(old_ship) {
             ship.pos.copy(old_ship.pos);
             ship.vel.copy(old_ship.vel);
             ship.rot = old_ship.rot;
 
+            // Now that we've copied old ship's pos over to new ship, reset
+            // camera's position to that of ship
+            this.player.camera.initFromTarget();
+
             old_ship.remove();
+
             // HACK: old_ship has only been marked for removal, we now
             // manually call the function which truly removes it.
             // We do this because otherwise, the old and new ships
             // coexist for one frame, which is enough time for them
             // to collide with each other...
-            this.game.field.removeEntities(this.game.field.ships);
+            field.removeEntities(field.ships);
         } else {
             var i = this.player.getIndex();
             var n = this.game.players.length;
             var addx = getRotVariance(i, n) * 12 * RADIUSMUL;
-            ship.pos.setMidpoint(this.game.field.size).addxy(addx);
+            ship.pos.setMidpoint(field.size).addxy(addx);
         }
 
         this.subtitles = [];
@@ -4242,7 +4325,7 @@ class ChooseShipMenu extends Menu {
 }
 
 class MapMenu extends Menu {
-    /* A menu which shows game.progress.map */
+    /* A menu which shows this.player.progress */
 
     node = null;
     edge_i = 0;
@@ -4257,7 +4340,7 @@ class MapMenu extends Menu {
     constructor(player) {
         super(player);
 
-        var progress = player.game.progress;
+        var progress = player.progress;
         var node = progress.node;
         var edge = progress.edge;
         var edge_i = edge? node.getEdgeIndex(edge): 0;
@@ -4273,7 +4356,7 @@ class MapMenu extends Menu {
         var title = this.node.title;
         var lines = [];
 
-        var progress = this.game.progress;
+        var progress = this.player.progress;
         var node1 = this.edge.getNode1();
         if(progress.edge && this.edge === progress.edge) {
             lines.push('Travelling to: ' + node1.title);
@@ -4317,7 +4400,7 @@ class MapMenu extends Menu {
 
         this.text.render(canvas);
 
-        var progress = this.game.progress;
+        var progress = this.player.progress;
         var map = progress.map;
 
         var pos0 = this.node === progress.node?
@@ -4429,15 +4512,11 @@ class WarpMapMenu extends MapMenu {
     }
     keyDown(keyname) {
         if(keyname === 'enter') {
-            var progress = this.game.progress;
-            progress.setEdge(this.edge);
-            progress.proceed();
-
-            // We do this before calling game.warp(), because game.warp()
+            // We do this before calling player.warp(), because player.warp()
             // may call player.setMenu(ShopMenu)
             this.player.unsetMenu();
 
-            this.game.warp();
+            this.player.warp(this.edge);
         } else {
             super.keyDown(keyname);
         }
@@ -5088,8 +5167,7 @@ class HasTurretsShip extends Ship {
         return turret;
     }
     removeTurret(turret) {
-        var i = this.turrets.indexOf(turret);
-        this.turrets.splice(i, 1);
+        removeArrayElem(this.turrets, turret);
         turret.flagship = null;
     }
     step() {
@@ -7524,7 +7602,7 @@ var defaultMap = new function() {
     };
 };
 
-var game = new Game(new MapProgress(defaultMap.map));
+var game = new Game(defaultMap.map);
 
 (function() {
     for(var i = 0; i < N_PLAYERS; i++) {
@@ -7536,8 +7614,9 @@ var game = new Game(new MapProgress(defaultMap.map));
         canvases.appendChild(canvas);
 
         var player = game.addPlayer(canvas);
+        var field = player.getField();
 
-        if(game.field.shop) player.setMenu(ShopMenu);
+        if(field.shop) player.setMenu(ShopMenu);
         else player.setMenu(ChooseShipMenu);
     }
 
