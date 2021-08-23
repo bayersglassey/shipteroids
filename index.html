@@ -38,7 +38,7 @@ body {
 </div>
 </td>
 <td>
-<div id="canvases" tabindex=-1>
+<div id="canvas-container" tabindex=-1>
 Loading...
 </div>
 </td>
@@ -176,6 +176,7 @@ var HIDE_TEXT = getBoolParam('hide_text');
 var NODAMAGE = getBoolParam('nodamage');
 var VIBRATE = !getBoolParam('novibrate');
 var N_PLAYERS = getIntParam('players', 1);
+var MAX_PLAYERS = 4;
 
 // physics tweaking stuff
 var VELMUL = getFloatParam('velmul', .7); // multiplier for vel when being added to pos
@@ -225,49 +226,72 @@ var DEFAULT_FUEL_CHANCE = .12;
 var DEFAULT_GOLD_CHANCE = 1;
 
 // keyCode values
-var KEY_U = 38;
-var KEY_D = 40;
-var KEY_L = 37;
-var KEY_R = 39;
-var KEY_W = 87;
-var KEY_ENTER = 13;
-var KEY_SPACE = 32;
-var KEY_SHIFT = 16;
-var KEY_TAB = 9;
+var KEYS = {
+    b: 66,
+    c: 67,
+    h: 72,
+    i: 73,
+    k: 75,
+    l: 76,
+    n: 78,
+    o: 79,
+    s: 83,
+    v: 86,
+    w: 87,
+    x: 88,
+    y: 89,
+    z: 90,
 
-// keyCode values for player 2
-var KEY_S = 83;
-var KEY_X = 88;
-var KEY_Z = 90;
-var KEY_C = 67;
-var KEY_V = 86;
-var KEY_B = 66;
-var KEY_N = 78;
-var KEY_H = 72;
-var KEY_Y = 89;
+    8: 56,
+    9: 57,
+
+    up: 38,
+    down: 40,
+    left: 37,
+    right: 39,
+    enter: 13,
+    space: 32,
+    shift: 16,
+    tab: 9,
+};
 
 // Player keymappings
-var PLAYER1_KEYS = {
-    u:     KEY_U,
-    d:     KEY_D,
-    l:     KEY_L,
-    r:     KEY_R,
-    x:     KEY_SPACE,
-    y:     KEY_SHIFT,
-    warp:  KEY_W,
-    tab:   KEY_TAB,
-    enter: KEY_ENTER,
-};
-var PLAYER2_KEYS = {
-    u:     KEY_S,
-    d:     KEY_X,
-    l:     KEY_Z,
-    r:     KEY_C,
-    x:     KEY_V,
-    y:     KEY_B,
-    warp:  KEY_Y,
-    tab:   KEY_N,
-    enter: KEY_H,
+var DEFAULT_PLAYER_KEYMAPPINGS = {
+    0: {
+        u:     KEYS.up,
+        d:     KEYS.down,
+        l:     KEYS.left,
+        r:     KEYS.right,
+        x:     KEYS.space,
+        y:     KEYS.shift,
+        warp:  KEYS.w,
+        tab:   KEYS.tab,
+        enter: KEYS.enter,
+    },
+    1: {
+        u:     KEYS.s,
+        d:     KEYS.x,
+        l:     KEYS.z,
+        r:     KEYS.c,
+        x:     KEYS.v,
+        y:     KEYS.b,
+        warp:  KEYS.y,
+        tab:   KEYS.n,
+        enter: KEYS.h,
+    },
+
+    // These players have juuust enough keys set that they can
+    // open the menu and set up their controls...
+    2: {
+        u:     KEYS.i,
+        d:     KEYS.k,
+        enter: KEYS[8],
+    },
+    3: {
+        u:     KEYS.o,
+        d:     KEYS.l,
+        enter: KEYS[9],
+    },
 };
 
 // Gamepad button indices for HTML5 Gamepad.buttons
@@ -3152,6 +3176,9 @@ class Player {
         this.team = TEAMS.get('green');
         this.keys = Key.createKeys();
     }
+    cleanup() {
+        if(this.entity) this.entity.die();
+    }
     setTeam(team) {
         this.team = team;
         if(this.entity) this.entity.setTeam(team);
@@ -3278,6 +3305,13 @@ class HumanPlayer extends Player {
         this.combined_keys = Key.createKeys();
 
         this._getOrCreateField();
+    }
+    cleanup() {
+        this._removeFromField();
+        this.menu.cleanup();
+        canvas_container.removeChild(this.canvas);
+
+        super.cleanup();
     }
     _removeFromField() {
         /* Removes this player from their current field (if any) */
@@ -3595,8 +3629,8 @@ class Game {
     constructor(map) {
         this.map = map;
 
-        canvases.addEventListener('keydown', this.onKeyDown.bind(this));
-        canvases.addEventListener('keyup', this.onKeyUp.bind(this));
+        canvas_container.addEventListener('keydown', this.onKeyDown.bind(this));
+        canvas_container.addEventListener('keyup', this.onKeyUp.bind(this));
 
         window.addEventListener('gamepadconnected',
             this.onGamepadActivity.bind(this));
@@ -3681,7 +3715,27 @@ class Game {
         var key = this.keysByCode[keyCode];
         if(key) key.up();
     }
-    addPlayer(canvas, progress) {
+    addPlayer() {
+        var canvas = document.createElement('canvas');
+        canvas.className = 'canvas';
+        canvas.width = CANVAS_WIDTH;
+        canvas.height = CANVAS_HEIGHT;
+        canvas_container.appendChild(canvas);
+        this._updateCanvasWidths(this.players.length + 1);
+
+        var player = this._addPlayer(canvas);
+        var field = player.getField();
+
+        if(field.shop) player.setMenu(ShopMenu);
+        else player.setMenu(ChooseShipMenu);
+
+        var keymapping = getDefault(
+            DEFAULT_PLAYER_KEYMAPPINGS[player.getIndex()], null);
+        if(keymapping) this.mapKeys(player.keys, keymapping);
+
+        return player;
+    }
+    _addPlayer(canvas, progress) {
         if(!progress) progress = new MapProgress(this.map);
 
         var player = new HumanPlayer(this, canvas, progress);
@@ -3692,6 +3746,34 @@ class Game {
         player.gamepad_index = player.getIndex();
 
         return player;
+    }
+    _updateCanvasWidths(n_players) {
+        n_players = getDefault(n_players, this.players.length);
+        var canvases = document.getElementsByClassName('canvas');
+        for(var canvas of canvases) {
+            var players_per_row = Math.min(n_players, 2);
+            canvas.style.maxWidth = String(
+                Math.floor(100 / players_per_row)) + '%';
+        }
+
+        if(n_players > 1) {
+            // HACKY MULTIPLAYER INTERFACE... just remove the controls :P
+            controls.style.display = 'none';
+        } else {
+            controls.style.display = '';
+        }
+    }
+    removePlayer() {
+        // NOTE: you can only remove the last player, not an arbitrary
+        // one. That's because we rely on players' indices into game.players,
+        // see HumanPlayer.getIndex().
+
+        if(this.players.length <= 1) throw new Error("Can't have no players");
+
+        var player = this.players[this.players.length - 1];
+        player.cleanup();
+        this.players.pop();
+        this._updateCanvasWidths();
     }
     step() {
 
@@ -4063,12 +4145,44 @@ class OptionsMenu extends Menu {
     }
 }
 
+class BranchMenuOption extends MenuOption {
+    /* An option whose value is a subclass of Menu */
+
+    constructor(title, value, description, closeCallingMenu) {
+        super(title, value, description);
+
+        // Whether the calling menu closes itself before opening
+        // the sub-menu (so that leaving the sub-menu doesn't take you
+        // back to the calling menu)
+        this.closeCallingMenu = getDefault(closeCallingMenu, false);
+    }
+}
+
+class RunnableMenuOption extends MenuOption {
+    /* An option whose value is a function to be called when the option
+    is selected.
+    The function takes one argument: the selected RunnableMenuOption.
+    The function's "this" is the calling Menu.
+    The function's return value is ignored. */
+}
+
 class BranchingMenu extends OptionsMenu {
     /* A menu whose purpose is to list submenus (i.e. branches).
-    NOTE: this.options[i].value should be a subclass of Menu. */
+    NOTE: this.options[i] should be a BranchMenuOption or a
+    RunnableMenuOption */
 
     select(option) {
-        this.player.setMenu(option.value);
+        if(option instanceof BranchMenuOption) {
+            if(option.closeCallingMenu) this.player.unsetMenu();
+            this.player.setMenu(option.value);
+        } else if(option instanceof RunnableMenuOption) {
+            option.value.call(this, option);
+        } else {
+            console.log(this, option);
+            throw new Error(
+                "Expected BranchMenuOption or RunnableMenuOption, got: "
+                + option.constructor.toString());
+        }
         super.select(option);
     }
 }
@@ -4077,9 +4191,15 @@ class MainMenu extends BranchingMenu {
     title = "Main menu";
 
     options = [
-        new MenuOption("Choose ship", ChooseShipMenu),
-        new MenuOption("Set keyboard controls", KeyboardControlsMenu),
-        new MenuOption("Set gamepad controls", GamepadControlsMenu),
+        new BranchMenuOption("Choose ship", ChooseShipMenu, undefined, true),
+        new BranchMenuOption("Set keyboard controls", KeyboardControlsMenu),
+        new BranchMenuOption("Set gamepad controls", GamepadControlsMenu),
+        new RunnableMenuOption("Add player", function(option) {
+            if(this.game.players.length < MAX_PLAYERS) this.game.addPlayer();
+        }),
+        new RunnableMenuOption("Remove player", function(option) {
+            if(this.game.players.length > 1) this.game.removePlayer();
+        }),
     ];
 
     constructor(player) {
@@ -4290,10 +4410,6 @@ class ChooseShipMenu extends Menu {
             ship.vel.copy(old_ship.vel);
             ship.rot = old_ship.rot;
 
-            // Now that we've copied old ship's pos over to new ship, reset
-            // camera's position to that of ship
-            this.player.camera.initFromTarget();
-
             old_ship.remove();
 
             // HACK: old_ship has only been marked for removal, we now
@@ -4304,10 +4420,12 @@ class ChooseShipMenu extends Menu {
             field.removeEntities(field.ships);
         } else {
             var i = this.player.getIndex();
-            var n = this.game.players.length;
-            var addx = getRotVariance(i, n) * 12 * RADIUSMUL;
+            var addx = i * 14 * RADIUSMUL * 2;
             ship.pos.setMidpoint(field.size).addxy(addx);
         }
+
+        // Reset camera's position to that of ship
+        this.player.camera.initFromTarget();
 
         this.subtitles = [];
         this.subtitles.push('Choose your ship');
@@ -7166,7 +7284,7 @@ var SHIP_CLASSES = new OrderedDict()
 ;
 
 
-var canvases = document.getElementById('canvases');
+var canvas_container = document.getElementById('canvas-container');
 var controls = document.getElementById('controls');
 
 var defaultMap = new function() {
@@ -7603,35 +7721,10 @@ var defaultMap = new function() {
 };
 
 var game = new Game(defaultMap.map);
+for(var i = 0; i < N_PLAYERS; i++) game.addPlayer();
 
-(function() {
-    for(var i = 0; i < N_PLAYERS; i++) {
-        var canvas = document.createElement('canvas');
-        canvas.className = 'canvas';
-        canvas.width = CANVAS_WIDTH;
-        canvas.height = CANVAS_HEIGHT;
-        canvas.style.maxWidth = String(Math.floor(100 / N_PLAYERS)) + '%';
-        canvases.appendChild(canvas);
-
-        var player = game.addPlayer(canvas);
-        var field = player.getField();
-
-        if(field.shop) player.setMenu(ShopMenu);
-        else player.setMenu(ChooseShipMenu);
-    }
-
-    game.mapKeys(game.players[0].keys, PLAYER1_KEYS);
-
-    if(game.players.length > 1) {
-        // HACKY MULTIPLAYER INTERFACE... just remove the controls :P
-        controls.style.display = 'none';
-
-        game.mapKeys(game.players[1].keys, PLAYER2_KEYS);
-    }
-})();
-
-canvases.childNodes[0].data = ''; // Remove the 'Loading...' text
-canvases.focus();
+canvas_container.childNodes[0].data = ''; // Remove the 'Loading...' text
+canvas_container.focus();
 
 game.play();
 
