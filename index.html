@@ -106,6 +106,8 @@ Loading...
 *
 * TODO:
 *
+* !!! finish GamepadControlsMenu !!!
+*
 * Fixing current "Choose Ship" menu, where you can always get a free ship
 * at full health, what if we make it so whenever warping into an area,
 * you can choose a ship to use?
@@ -4047,6 +4049,31 @@ class MenuOption {
 
         this.description = getDefault(description, null);
     }
+    getTitle() {
+        // May be overridden by subclasses
+        return this.title;
+    }
+}
+
+class BranchMenuOption extends MenuOption {
+    /* An option whose value is a subclass of Menu */
+
+    constructor(title, value, description, closeCallingMenu) {
+        super(title, value, description);
+
+        // Whether the calling menu closes itself before opening
+        // the sub-menu (so that leaving the sub-menu doesn't take you
+        // back to the calling menu)
+        this.closeCallingMenu = getDefault(closeCallingMenu, false);
+    }
+}
+
+class RunnableMenuOption extends MenuOption {
+    /* An option whose value is a function to be called when the option
+    is selected.
+    The function takes one argument: the selected RunnableMenuOption.
+    The function's "this" is the calling Menu.
+    The function's return value is ignored. */
 }
 
 class OptionsMenu extends Menu {
@@ -4123,7 +4150,7 @@ class OptionsMenu extends Menu {
     }
     getOptionTitle(option) {
         // May be overridden by subclasses
-        return option.title;
+        return option.getTitle();
     }
     keyDown(keyname) {
         if(keyname === 'u') {
@@ -4147,8 +4174,18 @@ class OptionsMenu extends Menu {
             }
         }
     }
-    select(option) {
+    _select(option) {
         // To be overridden by subclasses
+    }
+    select(option) {
+        if(option instanceof BranchMenuOption) {
+            if(option.closeCallingMenu) this.player.unsetMenu();
+            this.player.setMenu(option.value);
+        } else if(option instanceof RunnableMenuOption) {
+            option.value.call(this, option);
+        } else {
+            this._select(option);
+        }
         this.update();
     }
     finish() {
@@ -4159,49 +4196,7 @@ class OptionsMenu extends Menu {
     }
 }
 
-class BranchMenuOption extends MenuOption {
-    /* An option whose value is a subclass of Menu */
-
-    constructor(title, value, description, closeCallingMenu) {
-        super(title, value, description);
-
-        // Whether the calling menu closes itself before opening
-        // the sub-menu (so that leaving the sub-menu doesn't take you
-        // back to the calling menu)
-        this.closeCallingMenu = getDefault(closeCallingMenu, false);
-    }
-}
-
-class RunnableMenuOption extends MenuOption {
-    /* An option whose value is a function to be called when the option
-    is selected.
-    The function takes one argument: the selected RunnableMenuOption.
-    The function's "this" is the calling Menu.
-    The function's return value is ignored. */
-}
-
-class BranchingMenu extends OptionsMenu {
-    /* A menu whose purpose is to list submenus (i.e. branches).
-    NOTE: this.options[i] should be a BranchMenuOption or a
-    RunnableMenuOption */
-
-    select(option) {
-        if(option instanceof BranchMenuOption) {
-            if(option.closeCallingMenu) this.player.unsetMenu();
-            this.player.setMenu(option.value);
-        } else if(option instanceof RunnableMenuOption) {
-            option.value.call(this, option);
-        } else {
-            console.log(this, option);
-            throw new Error(
-                "Expected BranchMenuOption or RunnableMenuOption, got: "
-                + option.constructor.toString());
-        }
-        super.select(option);
-    }
-}
-
-class MainMenu extends BranchingMenu {
+class MainMenu extends OptionsMenu {
     title = "Main menu";
 
     options = [
@@ -4242,7 +4237,7 @@ class KeyboardControlsMenu extends OptionsMenu {
         this.initOptions();
     }
     getOptionTitle(option) {
-        var subtitle = option.title;
+        var subtitle = option.getTitle();
 
         var keyinfo = option.value;
         var key = this.player.keys[keyinfo.name];
@@ -4257,7 +4252,7 @@ class KeyboardControlsMenu extends OptionsMenu {
 
         return subtitle;
     }
-    select(option) {
+    _select(option) {
         var keyinfo = option.value;
         var key = this.player.keys[keyinfo.name];
 
@@ -4286,8 +4281,22 @@ class KeyboardControlsMenu extends OptionsMenu {
             menu.waitingForKey = null;
             menu.update();
         }
+    }
+}
 
-        super.select(option);
+class UseGamepadMenuOption extends RunnableMenuOption {
+    constructor(gamepad_index) {
+        var title = gamepad_index < 0? "Don't use gamepad":
+            "Use gamepad #" + (gamepad_index + 1);
+
+        function callback(option) {
+            // NOTE: when this function is called, "this" is a Menu
+            this.player.gamepad_index = option.gamepad_index;
+        }
+
+        super(title, callback);
+
+        this.gamepad_index = gamepad_index;
     }
 }
 
@@ -4295,13 +4304,27 @@ class GamepadControlsMenu extends OptionsMenu {
     /* A menu which allows a player to set their controls. */
 
     title = "Set gamepad controls";
-    description = ['(TODO: allow changing behaviour of individual buttons)'];
+
     options = [
+        new UseGamepadMenuOption(0),
+        new UseGamepadMenuOption(1),
+        new UseGamepadMenuOption(2),
+        new UseGamepadMenuOption(3),
+        new UseGamepadMenuOption(-1),
     ];
 
     constructor(player) {
         super(player);
         this.initOptions();
+    }
+    getOptionTitle(option) {
+        var subtitle = option.getTitle();
+
+        if(this.player.gamepad_index === option.gamepad_index) {
+            subtitle = '[' + subtitle + ']';
+        }
+
+        return subtitle;
     }
 }
 
@@ -4349,12 +4372,11 @@ class ShopMenu extends OptionsMenu {
         }
         return subtitle;
     }
-    select(option) {
+    _select(option) {
         var item = option.value;
         if(item && !item.cantBuy(this.player)) {
             item.buy(this.player);
         }
-        super.select(option);
     }
     finish() {
         // That is, "leave the shop"
