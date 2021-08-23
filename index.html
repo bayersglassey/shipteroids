@@ -24,14 +24,25 @@ body {
 <td>
 <div id="controls" class="controls">
     <h2>&#x25BC; DEFAULT CONTROLS &#x25BC;</h2>
+    <h3>Player 1</h3>
     <table class="controls-table">
         <tr><td><b>Left / right</b></td><td>Turn left / right</td></tr>
         <tr><td><b>Up / down</b></td><td>Thrust / reverse</td></tr>
         <tr><td><b>Spacebar</b></td><td>Fire weapon / use ability #1</td></tr>
         <tr><td><b>Shift</b></td><td>Fire weapon / use ability #2</td></tr>
-        <tr><td><b>W</b></td><td>Attempt to warp to next area</td></tr>
+        <tr><td><b>Backspace</b></td><td>Attempt to warp to next area</td></tr>
         <tr><td><b>Tab</b></td><td>Hold to view map</td></tr>
         <tr><td><b>Enter</b></td><td>Open the menu &amp; make selections</td></tr>
+    </table>
+    <h3>Player 2</h3>
+    <table class="controls-table">
+        <tr><td><b>A / D</b></td><td>Turn left / right</td></tr>
+        <tr><td><b>W / S</b></td><td>Thrust / reverse</td></tr>
+        <tr><td><b>V</b></td><td>Fire weapon / use ability #1</td></tr>
+        <tr><td><b>B</b></td><td>Fire weapon / use ability #2</td></tr>
+        <tr><td><b>Y</b></td><td>Attempt to warp to next area</td></tr>
+        <tr><td><b>N</b></td><td>Hold to view map</td></tr>
+        <tr><td><b>H</b></td><td>Open the menu &amp; make selections</td></tr>
     </table>
     <br>
     If the controls don't seem to work, you may need to click on the game area to focus it.
@@ -176,7 +187,7 @@ var HIDE_TEXT = getBoolParam('hide_text');
 var NODAMAGE = getBoolParam('nodamage');
 var VIBRATE = !getBoolParam('novibrate');
 var N_PLAYERS = getIntParam('players', 1);
-var MAX_PLAYERS = 4;
+var MAX_PLAYERS = 2;
 
 // physics tweaking stuff
 var VELMUL = getFloatParam('velmul', .7); // multiplier for vel when being added to pos
@@ -227,8 +238,10 @@ var DEFAULT_GOLD_CHANCE = 1;
 
 // keyCode values
 var KEYS = {
+    a: 65,
     b: 66,
     c: 67,
+    d: 68,
     h: 72,
     i: 73,
     k: 75,
@@ -252,6 +265,7 @@ var KEYS = {
     enter: 13,
     space: 32,
     shift: 16,
+    backspace: 8,
     tab: 9,
 };
 
@@ -264,15 +278,15 @@ var DEFAULT_PLAYER_KEYMAPPINGS = {
         r:     KEYS.right,
         x:     KEYS.space,
         y:     KEYS.shift,
-        warp:  KEYS.w,
+        warp:  KEYS.backspace,
         tab:   KEYS.tab,
         enter: KEYS.enter,
     },
     1: {
-        u:     KEYS.s,
-        d:     KEYS.x,
-        l:     KEYS.z,
-        r:     KEYS.c,
+        u:     KEYS.w,
+        d:     KEYS.s,
+        l:     KEYS.a,
+        r:     KEYS.d,
         x:     KEYS.v,
         y:     KEYS.b,
         warp:  KEYS.y,
@@ -7368,7 +7382,7 @@ var defaultMap = new function() {
                 fuel_chance: 0,
                 text: new Text('Welcome to space', [
                     'Try out your new ship.',
-                    'Once you\'re ready, press W to warp to the next area.',
+                    'Once you\'re ready, press Backspace to warp to the next area.',
                     'Try not to hit things while warping.',
                 ]),
             }), {intro1: 1}),
