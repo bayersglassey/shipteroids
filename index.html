@@ -108,6 +108,17 @@ Loading...
 *
 * !!! finish GamepadControlsMenu !!!
 *
+* ADD DEBUGGING -- specifically for timing. Need to figure out which parts of
+* the code are occasionally slowing down.
+*
+* Black holes (or... planets?..) which have "gravity", sucking things around
+* them towards themselves slightly.
+*
+* In multiplayer, needs to be easier to find your teammate!
+* E.g. if in current area, show a little arrow pointing to teammate if
+* they're not on your screen.
+* And MapMenu should show you your teammates.
+*
 * Fixing current "Choose Ship" menu, where you can always get a free ship
 * at full health, what if we make it so whenever warping into an area,
 * you can choose a ship to use?
@@ -192,6 +203,7 @@ var N_PLAYERS = getIntParam('players', 1);
 var MAX_PLAYERS = 2;
 
 // physics tweaking stuff
+var DEFAULT_GRAVITY = getFloatParam('gravity', 0); // multiplier for planet gravity
 var VELMUL = getFloatParam('velmul', .7); // multiplier for vel when being added to pos
 var ADDVELMUL = getFloatParam('addvelmul', 0); // number between 0 and 1, increases velmul towards 1
 var SHIP_ADDVELMUL = getFloatParam('ship_addvelmul', 0); // number between 0 and 1, increases ships' velmul towards 1
@@ -1636,6 +1648,9 @@ class Field {
                     rock.handleCollisionPhysics(pickup);
                 }
             }
+            if(DEFAULT_GRAVITY) for(var planet of this.planets) {
+                rock.gravity(planet, DEFAULT_GRAVITY);
+            }
         }
 
         for(var i = 0; i < this.ships.length; i++) {
@@ -1660,6 +1675,9 @@ class Field {
                     ship.handleCollision(pickup);
                     pickup.handleCollision(ship);
                 }
+            }
+            if(DEFAULT_GRAVITY) for(var planet of this.planets) {
+                ship.gravity(planet, DEFAULT_GRAVITY);
             }
         }
 
@@ -2529,6 +2547,36 @@ class Entity extends Sprite {
         this._shouldRemove = true;
     }
     cleanup() {
+    }
+    gravity(other, mul, opts) {
+        mul = getDefault(mul, 1);
+        opts = opts || EMPTY;
+
+        var dx, dy;
+        if(this.modulo) {
+            dx = moduloDiff(this.pos.x, other.pos.x, this.modulo.x);
+            dy = moduloDiff(this.pos.y, other.pos.y, this.modulo.y);
+        } else {
+            dx = other.pos.x - this.pos.x;
+            dy = other.pos.y - this.pos.y;
+        }
+
+        var dist = this.pos.dist(other.pos, this.modulo);
+
+        // Just say no to dividing by zero!
+        if(!dist) {
+            dist = .01;
+            var p = new Point().addSpeed(dist, Random.randRotation());
+            dx += p.x;
+            dy += p.y;
+        }
+
+        var r0 = this.radius / (this.radius + other.radius);
+        var r1 = 1 - r0;
+
+        var m = mul * r1 / Math.max(dist * dist, other.radius);
+        this.vel.x += dx * m;
+        this.vel.y += dy * m;
     }
     step() {
         for(var keyname in this.shotClass) {
@@ -6450,7 +6498,8 @@ class BlasterShot extends Shot {
         super.afterShotBy(entity);
 
         // Firing this weapon has a "push back" effect on whatever fired it
-        entity.vel.addSpeed(-this.initialVelMul * 8, this.rot);
+        var kickback = this.initialVelMul * (8 + 4 * this.level);
+        entity.vel.addSpeed(kickback, this.rot + Math.PI);
     }
     die() {
         this.emitEffects(SmokeEffect, 3, {
