@@ -407,7 +407,7 @@ class OrderedDict {
 // teams
 class Team {
     constructor(name, color) {
-        this.name = name;
+        this.myname = name;
         this.color = color;
     }
 }
@@ -2289,7 +2289,7 @@ class Star extends Sprite {
 
 class KeyInfo {
     constructor(name, title, description) {
-        this.name = name;
+        this.myname = name;
         this.title = title;
         this.description = getDefault(description, null);
     }
@@ -2306,13 +2306,13 @@ var KEYINFOS = [
     new KeyInfo('tab',   'View map'),
     new KeyInfo('enter', 'Open menu / make selection'),
 ];
-var KEYNAMES = KEYINFOS.map(keyinfo => keyinfo.name);
+var KEYNAMES = KEYINFOS.map(keyinfo => keyinfo.myname);
 
 class Key {
     /* Represents the state of a key on the keyboard */
 
     constructor(name) {
-        this.name = name;
+        this.myname = name;
         this.isDown = false;
         this.wasDown = false;
     }
@@ -2377,7 +2377,7 @@ class Entity extends Sprite {
     /* An Entity is a sprite with "volition" -- it has virtual keys which
     can be pressed, and based on their state, it can move itself. */
 
-    static name = 'Entity';
+    static myname = 'Entity';
 
     thrustSpeed = 2;
     reverseSpeed = 1.25;
@@ -3140,7 +3140,7 @@ class Camera extends FieldParticle {
 }
 
 class Pickup extends Entity {
-    static name = 'Pickup';
+    static myname = 'Pickup';
 
     radius = 6 * RADIUSMUL;
     velmul = .95;
@@ -3178,7 +3178,7 @@ class Pickup extends Entity {
 }
 
 class EnergyPickup extends Pickup {
-    static name = 'Energy';
+    static myname = 'Energy';
 
     circleStrokeStyle = ENERGY_COLOR;
     picture = ENERGY_PICTURE;
@@ -3190,7 +3190,7 @@ class EnergyPickup extends Pickup {
 }
 
 class FuelPickup extends Pickup {
-    static name = 'Fuel';
+    static myname = 'Fuel';
 
     circleStrokeStyle = FUEL_COLOR;
     picture = FUEL_PICTURE;
@@ -3205,7 +3205,7 @@ class FuelPickup extends Pickup {
 }
 
 class GoldPickup extends Pickup {
-    static name = 'Gold';
+    static myname = 'Gold';
 
     circleStrokeStyle = GOLD_COLOR;
     picture = GOLD_PICTURE;
@@ -3224,7 +3224,7 @@ class Trinket {
     /* Something with no particular use, which players can obtain */
 
     constructor(name, description) {
-        this.name = name;
+        this.myname = name;
         this.description = description;
     }
 }
@@ -4288,7 +4288,7 @@ class KeyboardControlsMenu extends OptionsMenu {
         var subtitle = option.getTitle();
 
         var keyinfo = option.value;
-        var key = this.player.keys[keyinfo.name];
+        var key = this.player.keys[keyinfo.myname];
         var keyCode = this.game.getKeyCode(key);
         if(key === this.waitingForKey) {
             subtitle += ' [ ...please press a key... ]';
@@ -4302,7 +4302,7 @@ class KeyboardControlsMenu extends OptionsMenu {
     }
     _select(option) {
         var keyinfo = option.value;
-        var key = this.player.keys[keyinfo.name];
+        var key = this.player.keys[keyinfo.myname];
 
         this.waitingForKey = key;
 
@@ -4384,11 +4384,11 @@ class ShopMenu extends OptionsMenu {
 
         var field = this.player.getField();
         this.shop = field.shop;
-        this.title = this.shop.name;
+        this.title = this.shop.myname;
         this.description = this.shop.description;
 
         this.options = this.shop.items.map(item =>
-            new MenuOption(item.name, item, item.description));
+            new MenuOption(item.myname, item, item.description));
 
         this.initOptions();
     }
@@ -4410,7 +4410,7 @@ class ShopMenu extends OptionsMenu {
     getOptionTitle(option) {
         var item = option.value;
 
-        var subtitle = item.name + ' (' + item.price + ' G)';
+        var subtitle = item.myname + ' (' + item.price + ' G)';
         if(item.wasBoughtBy(this.player)) {
             subtitle = '[BOUGHT] ' + subtitle;
         } else if(item.price > this.player.gold) {
@@ -4522,7 +4522,7 @@ class ChooseShipMenu extends Menu {
                 break;
             default: break;
         }
-        this.subtitles.push('[' + cls.name + ']');
+        this.subtitles.push('[' + cls.myname + ']');
     }
 }
 
@@ -4726,7 +4726,7 @@ class WarpMapMenu extends MapMenu {
 }
 
 class Effect extends Entity {
-    static name = 'Effect';
+    static myname = 'Effect';
     fadeWithAge = true;
 }
 
@@ -4822,7 +4822,7 @@ class SparkEffect extends Effect {
 class Ship extends Entity {
     static maxhp = 100;
 
-    static name = 'Ship';
+    static myname = 'Ship';
 
     // idealTargetDist: ideal distance from target based on our weapons etc
     // (for use by CPU players)
@@ -4873,7 +4873,7 @@ class Ship extends Entity {
 }
 
 class FighterShip extends Ship {
-    static name = 'Fighter';
+    static myname = 'Fighter';
 
     radius = 7 * RADIUSMUL;
     thrustSpeed = 2;
@@ -4904,7 +4904,7 @@ class FighterShip extends Ship {
 }
 
 class ScoutShip extends Ship {
-    static name = 'Scout';
+    static myname = 'Scout';
     radius = 6 * RADIUSMUL;
 
     static maxhp = 100;
@@ -4979,7 +4979,7 @@ class ScoutShip extends Ship {
         super.step();
     }
     stepCPUKey(key) {
-        if(key.name === 'y') {
+        if(key.myname === 'y') {
             // Don't switch between wings in/out too often
             if(key.isDown) {
                 if(Math.random() < .05) key.up();
@@ -4993,7 +4993,7 @@ class ScoutShip extends Ship {
 }
 
 class RamShip extends Ship {
-    static name = 'Ram';
+    static myname = 'Ram';
     radius = 7 * RADIUSMUL;
 
     thrustSpeed = 1.5;
@@ -5076,13 +5076,13 @@ class RamShip extends Ship {
         }
     }
     stepCPUKey(key) {
-        if(key.name === 'y') {
+        if(key.myname === 'y') {
             if(Math.random() < .05) key.down();
             if(Math.random() < .001) key.up();
-        } else if(key.name === 'u') {
+        } else if(key.myname === 'u') {
             if(Math.random() < .05) key.down();
             if(Math.random() < .001) key.up();
-        } else if(key.name === 'l' || key.name === 'r' || key.name === 'd') {
+        } else if(key.myname === 'l' || key.myname === 'r' || key.myname === 'd') {
             if(Math.random() < .05) key.down();
             if(Math.random() < .05) key.up();
         } else {
@@ -5140,7 +5140,7 @@ class RamShip extends Ship {
 }
 
 class AssaultShip extends Ship {
-    static name = 'Assault';
+    static myname = 'Assault';
     radius = 12 * RADIUSMUL;
     thrustSpeed = 1.25;
     reverseSpeed = .75;
@@ -5166,7 +5166,7 @@ class AssaultShip extends Ship {
 }
 
 class TorchShip extends Ship {
-    static name = 'Torch';
+    static myname = 'Torch';
     radius = 6 * RADIUSMUL;
     thrustSpeed = 1.45;
     reverseSpeed = 1;
@@ -5197,7 +5197,7 @@ class TorchShip extends Ship {
 }
 
 class HunterShip extends Ship {
-    static name = 'Hunter';
+    static myname = 'Hunter';
     radius = 10 * RADIUSMUL;
     thrustSpeed = 1;
     reverseSpeed = .5;
@@ -5287,7 +5287,7 @@ class HunterShip extends Ship {
         }
     }
     stepCPUKey(key) {
-        if(key.name === 'y') {
+        if(key.myname === 'y') {
             if(this.hp < 15) {
                 // Don't kill yourself by staying cloaked at low health
                 key.up();
@@ -5420,7 +5420,7 @@ class HasTurretsShip extends Ship {
 }
 
 class TurretShip extends BaseTurretShip {
-    static name = 'Turret';
+    static myname = 'Turret';
     radius = 6 * RADIUSMUL;
     thrustSpeed = .95;
     reverseSpeed = .55;
@@ -5449,7 +5449,7 @@ class FlagTurretShip extends TurretShip {
 }
 
 class FlagShip extends HasTurretsShip {
-    static name = 'Flagship';
+    static myname = 'Flagship';
     radius = 10.5 * RADIUSMUL;
     thrustSpeed = 1.25;
     reverseSpeed = 1.25;
@@ -5501,7 +5501,7 @@ class FlagShip extends HasTurretsShip {
 }
 
 class MoleShip extends Ship {
-    static name = 'Mole';
+    static myname = 'Mole';
     radius = 6 * RADIUSMUL;
     thrustSpeed = 2.05;
     reverseSpeed = 1.15;
@@ -5557,7 +5557,7 @@ class MoleShip extends Ship {
         super.step();
     }
     stepCPUKey(key) {
-        if(key.name === 'y') {
+        if(key.myname === 'y') {
             if(this.rock) {
                 // Usually don't exit your rock
                 if(Math.random() < .001) key.down();
@@ -5658,7 +5658,7 @@ class MoleShip extends Ship {
 }
 
 class SuitShip extends Ship {
-    static name = 'Suit';
+    static myname = 'Suit';
     radius = 6 * RADIUSMUL;
     thrustSpeed = .5;
     reverseSpeed = .5;
@@ -5807,11 +5807,11 @@ class SuitShip extends Ship {
         return super._isAlly(other);
     }
     stepCPUKey(key) {
-        if(key.name === 'u' && this.rock) {
+        if(key.myname === 'u' && this.rock) {
             // Usually don't exit your rock
             if(Math.random() < .001) key.down();
             else key.up();
-        } else if(key.name === 'y' && !this.rock) {
+        } else if(key.myname === 'y' && !this.rock) {
             // Try to enter rocks
             if(Math.random() < .5) key.down();
             else key.up();
@@ -5822,7 +5822,7 @@ class SuitShip extends Ship {
 }
 
 class MinerShip extends SuitShip {
-    static name = 'Miner';
+    static myname = 'Miner';
 
     shotClass = {
         x: ToolShot,
@@ -5878,7 +5878,7 @@ class MinerShip extends SuitShip {
 }
 
 class EngineerShip extends SuitShip {
-    static name = 'Engineer';
+    static myname = 'Engineer';
 
     shotClass = {
         x: ToolShot,
@@ -5933,7 +5933,7 @@ class EngineerShip extends SuitShip {
 }
 
 class TroopShip extends SuitShip {
-    static name = 'Troop';
+    static myname = 'Troop';
     radius = 7 * RADIUSMUL;
 
     static maxhp = 95;
@@ -5969,7 +5969,7 @@ class TroopShip extends SuitShip {
 }
 
 class CrabShip extends Ship {
-    static name = 'Crab';
+    static myname = 'Crab';
     radius = 14 * RADIUSMUL;
     thrustSpeed = 3.25;
     reverseSpeed = 2.5;
@@ -6100,7 +6100,7 @@ function _initSwarmShip(leader) {
 }
 
 class SwarmTurretShip extends BaseTurretShip {
-    static name = 'Swarm';
+    static myname = 'Swarm';
     radius = 5 * RADIUSMUL;
 
     thrustSpeed = .7;
@@ -6120,7 +6120,7 @@ class SwarmTurretShip extends BaseTurretShip {
 }
 
 class SwarmShip extends HasTurretsShip {
-    static name = 'Swarm';
+    static myname = 'Swarm';
     radius = 6 * RADIUSMUL;
 
     static maxhp = 60;
@@ -6186,7 +6186,7 @@ class SwarmShip extends HasTurretsShip {
         }
     }
     stepCPUKey(key) {
-        if(key.name === 'y') {
+        if(key.myname === 'y') {
             if(Math.random() < .05) key.down();
             if(Math.random() < .01) key.up();
         } else {
@@ -6196,7 +6196,7 @@ class SwarmShip extends HasTurretsShip {
 }
 
 class BoreShip extends Ship {
-    static name = 'Bore';
+    static myname = 'Bore';
 
     radius = 7 * RADIUSMUL;
     thrustSpeed = 1.2;
@@ -6229,7 +6229,7 @@ class BoreShip extends Ship {
 }
 
 class CannonShip extends Ship {
-    static name = 'Cannon';
+    static myname = 'Cannon';
 
     radius = 9 * RADIUSMUL;
     thrustSpeed = .8;
@@ -6258,7 +6258,7 @@ class CannonShip extends Ship {
 }
 
 class Shot extends Entity {
-    static name = 'Shot';
+    static myname = 'Shot';
 
     static initialShots = 1;
     static serialShots = 1;
@@ -7032,7 +7032,7 @@ class BoreShot extends Shot {
 }
 
 class Rock extends Entity {
-    static name = 'Rock';
+    static myname = 'Rock';
 
     circleStrokeStyle = '#987';
     velmul = 1;
@@ -7204,14 +7204,14 @@ class ShopItem {
 class TrinketShopItem extends ShopItem {
     constructor(name, price, description) {
         super();
-        this.name = name;
+        this.myname = name;
         this.price = getDefault(price, 0);
         this.description = getDefault(description, 'A useless trinket.');
     }
     buy(player) {
         super.buy(player);
 
-        var trinket = new Trinket(this.name, this.description);
+        var trinket = new Trinket(this.myname, this.description);
         player.trinkets.push(trinket);
     }
 }
@@ -7242,7 +7242,7 @@ class MaxEnergyShopItem extends ShopItem {
     constructor(energy) {
         super();
         this.energy = energy;
-        this.name = '+' + String(energy) + ' Max Energy';
+        this.myname = '+' + String(energy) + ' Max Energy';
         this.price = 20 + energy * 2;
     }
     buy(player) {
@@ -7257,7 +7257,7 @@ class MaxFuelShopItem extends ShopItem {
     constructor(fuel) {
         super();
         this.fuel = fuel;
-        this.name = '+' + String(fuel) + ' Max Fuel';
+        this.myname = '+' + String(fuel) + ' Max Fuel';
         this.price = 20 + fuel * 2;
     }
     buy(player) {
@@ -7320,7 +7320,7 @@ class ShipShopItem extends ShopItem {
     constructor(cls, price) {
         super();
         this.cls = cls;
-        this.name = 'Ship: ' + cls.name;
+        this.myname = 'Ship: ' + cls.myname;
         this.price = price;
     }
     cantBuy(player) {
@@ -7328,7 +7328,7 @@ class ShipShopItem extends ShopItem {
         if(value) return value;
 
         if(player.shipClasses.indexOf(this.cls) >= 0) {
-            return 'Already have ship: ' + this.cls.name;
+            return 'Already have ship: ' + this.cls.myname;
         }
         return null;
     }
@@ -7340,7 +7340,7 @@ class ShipShopItem extends ShopItem {
 
 class Shop {
     constructor(name, description, items) {
-        this.name = name;
+        this.myname = name;
         this.description = description;
 
         // items: Array of ShopItem
