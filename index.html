@@ -62,6 +62,24 @@ Loading...
 'use strict';
 
 
+/**************************
+* BUGS:
+
+In "Basic Shop" there's an "undefined" item!..
+
+Uncaught Error: No picture defined for letter: -
+index.html?players=2&pickup_magnet=2&all_ships=1&x_shot_level=3&y_shot_level=3:4039 Uncaught Error: No picture defined for letter: -
+    at Writer.getPicture (index.html?players=2&pickup_magnet=2&all_ships=1&x_shot_level=3&y_shot_level=3:1966:19)
+    at Writer.getPictures (index.html?players=2&pickup_magnet=2&all_ships=1&x_shot_level=3&y_shot_level=3:1974:32)
+    at Game.renderTextPictures (index.html?players=2&pickup_magnet=2&all_ships=1&x_shot_level=3&y_shot_level=3:3927:31)
+    at renderText (index.html?players=2&pickup_magnet=2&all_ships=1&x_shot_level=3&y_shot_level=3:3975:18)
+    at Game.renderPlayerStats (index.html?players=2&pickup_magnet=2&all_ships=1&x_shot_level=3&y_shot_level=3:3996:13)
+    at Game.renderPlayer (index.html?players=2&pickup_magnet=2&all_ships=1&x_shot_level=3&y_shot_level=3:3907:14)
+    at Game.intervalCallback (index.html?players=2&pickup_magnet=2&all_ships=1&x_shot_level=3&y_shot_level=3:4032:50)
+
+*/
+
+
 /******************************
 * IDEAS:
 *
