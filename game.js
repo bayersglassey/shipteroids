@@ -92,7 +92,7 @@ index.html?players=2&pickup_magnet=2&all_ships=1&x_shot_level=3&y_shot_level=3:4
 * "aggro".
 * Different ship classes use different ones (or perhaps use each with
 * different probabilities).
-* Some ships stay aggro when low hp, or even go "kamikaze". E.g. Assault is
+* Some ships stay aggro when low hp, or even go "kamikaze". E.g. Boxer is
 * bad at running away.
 * Others are super fearful, e.g. mole when not in a rock, maybe Torch?
 *
@@ -2630,7 +2630,7 @@ class HumanPlayer extends Player {
     gold = RICH? MAXGOLD: 0;
 
     shipClasses = ALL_SHIPS? SHIP_CLASSES.getValues():
-        [FighterShip, ScoutShip, AssaultShip];
+        [FighterShip, ScoutShip, BoxerShip];
 
     // gamepad_index: index into navigator.getGamepads(), or -1
     gamepad_index = -1;
@@ -4200,6 +4200,20 @@ class FighterShip extends Ship {
     ]);
 }
 
+class ToumaShip extends FighterShip {
+    static myname = 'Touma';
+
+    shotClass = {
+        x: ToumaShot,
+        y: DoubleMissileShot,
+    };
+
+    picture = new Picture([
+        Shape.newPolygon(8),
+        Shape.newPolygon(3).mulxy(.75, 1.25),
+    ]);
+}
+
 class ScoutShip extends Ship {
     static myname = 'Scout';
     radius = 6 * RADIUSMUL;
@@ -4436,8 +4450,8 @@ class RamShip extends Ship {
     }
 }
 
-class AssaultShip extends Ship {
-    static myname = 'Assault';
+class BoxerShip extends Ship {
+    static myname = 'Boxer';
     radius = 12 * RADIUSMUL;
     thrustSpeed = 1.25;
     reverseSpeed = .75;
@@ -5714,6 +5728,11 @@ class DoubleShot extends SingleShot {
     serialRotVariance = Math.PI / 18;
 }
 
+class ToumaShot extends SingleShot {
+    static serialShots = 4;
+    serialRotVariance = Math.PI * 1.5;
+}
+
 class ShortDoubleShot extends ShortSingleShot {
     static serialShots = 2;
     serialRotVariance = Math.PI / 26;
@@ -6649,7 +6668,7 @@ class Shop {
 var SHIP_CLASSES = new OrderedDict()
     .set('fighter', FighterShip)
     .set('scout', ScoutShip)
-    .set('assault', AssaultShip)
+    .set('boxer', BoxerShip)
     .set('torch', TorchShip)
     .set('turret', TurretShip)
     .set('flag', FlagShip)
@@ -6663,4 +6682,5 @@ var SHIP_CLASSES = new OrderedDict()
     .set('troop', TroopShip)
     .set('bore', BoreShip)
     .set('cannon', CannonShip)
+    .set('touma', ToumaShip)
 ;

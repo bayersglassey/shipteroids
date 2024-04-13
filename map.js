@@ -483,12 +483,12 @@ var defaultMap = new function() {
                 ships_per: new MinMax(.75),
                 ships: mkships({
                     green: {scout: 1},
-                    blue: {assault: 1},
+                    blue: {boxer: 1},
                 }),
             }), {basic2: 2}),
         basic2: defnode('Basic Training', [],
             mktemplate({ships: mkships({
-                green: {fighter: .5, assault: 1, flag: .5},
+                green: {fighter: .5, boxer: 1, flag: .5},
                 yellow: {fighter: 2, scout: 1, mole: .5},
             })}), {basic3: 2, basic_shop: 3}),
         basic_shop: defnode('Basic Shop', [],
@@ -510,7 +510,7 @@ var defaultMap = new function() {
             }), {basic2: 2}),
         basic3: defnode('Basic Training', [],
             mktemplate({ships: mkships({
-                green: {assault: 1, scout: 1},
+                green: {boxer: 1, scout: 1},
                 yellow: {fighter: 1, mole: 1},
                 red: {torch: 1},
             })}), {basic0: 2, fire0: 4, corridor0: 2}),
@@ -556,7 +556,7 @@ var defaultMap = new function() {
 
         // CORRIDOR
         // A series of wide fields, with not many rocks, stars, or planets.
-        // Mostly blue team (assault+hunter), with some red (crab+hunter).
+        // Mostly blue team (boxer+hunter), with some red (crab+hunter).
         // Maybe the first time you meet hunters?..
         corridor0: defnode('Corridor', [],
             mktemplate({
@@ -568,7 +568,7 @@ var defaultMap = new function() {
                 planets_per: new MinMax(.2),
                 ships: mkships({
                     green: {fighter: 1},
-                    blue: {assault: 1, hunter: .5},
+                    blue: {boxer: 1, hunter: .5},
                     red: {crab: 1},
                 }),
             }), {corridor1: 4}),
@@ -582,7 +582,7 @@ var defaultMap = new function() {
                 stars_per: new MinMax(.2),
                 planets_per: new MinMax(.2),
                 ships: mkships({
-                    blue: {assault: 1, hunter: .5},
+                    blue: {boxer: 1, hunter: .5},
                     red: {crab: 1, hunter: .5},
                 }),
             }), {corridor2: 4, corridor_shop: 1}),
@@ -610,7 +610,7 @@ var defaultMap = new function() {
                 stars_per: new MinMax(.2),
                 planets_per: new MinMax(.2),
                 ships: mkships({
-                    blue: {assault: 1, hunter: .5, flag: .5},
+                    blue: {boxer: 1, hunter: .5, flag: .5},
                     red: {crab: 1, hunter: .5, ram: 1},
                 }),
             }), {rock0: 3, mines0: 3}),
@@ -638,7 +638,7 @@ var defaultMap = new function() {
                 ships_per: new MinMax(2),
                 ships: mkships({
                     green: {fighter: 1, mole: .5, engineer: .5, troop: .5},
-                    blue: {assault: 1, mole: 1, troop: 1},
+                    blue: {boxer: 1, mole: 1, troop: 1},
                     yellow: {scout: 1, mole: 1, engineer: 1},
                     red: {mole: .5, troop: 2},
                 }),
