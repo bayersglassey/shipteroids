@@ -4214,6 +4214,56 @@ class ToumaShip extends FighterShip {
     ]);
 }
 
+class ScorpionShip extends FighterShip {
+    static myname = 'Scorpion';
+
+    radius = 11 * RADIUSMUL;
+
+    constructor(field) {
+        super(field);
+
+        this.chomp_cooldown = 32;
+
+        // Set up this.picture with Shapes assigned to properties of
+        // this so that we can easily animate them
+        this.left_arm = new Shape([
+            new Point(  0, -.4),
+            new Point( .2, -.9),
+            new Point(  1, -.4),
+        ]).addxy(.5, -.5);
+        this.right_arm = this.left_arm.clone().flip();
+        this.tail = [
+            // TODO...
+            Shape.newPolygon(8).mulxy(1.5, 1),
+        ];
+        this.picture = new Picture([
+            Shape.newPolygon(8).mulxy(1.5, 1),
+            this.left_arm,
+            this.right_arm,
+        ]);
+    }
+    step() {
+        super.step();
+        this.animate();
+    }
+    animate() {
+        var i = this.shotprops.x.cooldown / this.chomp_cooldown;
+
+        // NOTE: arm_addx, arm_addy seem to have less effect than I expected.
+        // Bug in Picture.render?..
+        var arm_addx = 1 * i;
+        var arm_addy = .5 * i;
+
+        var arm_rot = -Math.PI / 2 * i;
+
+        this.left_arm.pos.set(arm_addx, arm_addy);
+        this.left_arm.rot = arm_rot;
+
+        this.right_arm.pos.set(arm_addx, -arm_addy);
+        this.right_arm.rot = -arm_rot;
+    }
+}
+
 class ScoutShip extends Ship {
     static myname = 'Scout';
     radius = 6 * RADIUSMUL;
@@ -6683,4 +6733,5 @@ var SHIP_CLASSES = new OrderedDict()
     .set('bore', BoreShip)
     .set('cannon', CannonShip)
     .set('touma', ToumaShip)
+    .set('scorpion', ScorpionShip)
 ;
