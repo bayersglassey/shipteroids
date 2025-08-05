@@ -128,6 +128,8 @@ var SLOMO = getFloatParam('slomo', 0); // number between 0 and 1, slows down phy
 VELMUL = linear(VELMUL, 0, SLOMO);
 ADDVELMUL = linear(ADDVELMUL, 1, SLOMO);
 
+var MILLIS = getIntParam('millis', 30);
+
 if(DEBUG) {
     RICH = true;
     ALL_SHIPS = true;
@@ -148,13 +150,7 @@ for(var i = 0; i < N_PLAYERS; i++) game.addPlayer();
 canvas_container.childNodes[0].data = ''; // Remove the 'Loading...' text
 canvas_container.focus();
 
-game.play();
+game.play(MILLIS);
 </script>
 </body>
 </html>
-
-
-
-
-
-
