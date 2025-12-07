@@ -6,8 +6,25 @@ body {
     color: #fff;
     background-color: #000;
 }
+#canvas-container {
+    text-align: center;
+}
 .canvas {
     display: inline; /* So we can center it with text-align: center */
+}
+@media (orientation: landscape) {
+    .canvas {
+        height: 100%; /* fill #canvas-container, particularly when fullscreen */
+    }
+}
+@media (orientation: portrait) {
+    .canvas {
+        width: 100%; /* fill #canvas-container, particularly when fullscreen */
+    }
+}
+#fullscreen-link {
+    cursor: pointer;
+    text-decoration: underline;
 }
 .controls {
     width: 22em;
@@ -23,6 +40,7 @@ body {
 <tr>
 <td>
 <div id="controls" class="controls">
+    <p><span id="fullscreen-link">ENTER FULLSCREEN</span>
     <h2>&#x25BC; DEFAULT CONTROLS &#x25BC;</h2>
     <h3>Player 1</h3>
     <table class="controls-table">
@@ -143,6 +161,10 @@ if(DEBUG) {
 <script>
 var canvas_container = document.getElementById('canvas-container');
 var controls_elem = document.getElementById('controls');
+
+document.getElementById('fullscreen-link').addEventListener('click', event => {
+    canvas_container.requestFullscreen();
+});
 
 var game = new Game(defaultMap.map, canvas_container, controls_elem);
 for(var i = 0; i < N_PLAYERS; i++) game.addPlayer();
