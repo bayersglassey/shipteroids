@@ -2105,8 +2105,9 @@ class Entity extends Sprite {
 
         var serial_i = shotprops.n_shots % cls.serialShots;
         for(var i = 0; i < cls.initialShots; i++) {
-            var shot = this.shoot(cls, i, serial_i, shotprops);
-            this.afterShot(shot);
+            var shot_details = {i: i, serial_i: serial_i, shotprops: shotprops};
+            var shot = this.shoot(cls, shot_details);
+            this.afterShot(shot, shot_details);
         }
 
         if(cls.vibrateDuration) {
@@ -2117,10 +2118,14 @@ class Entity extends Sprite {
 
         shotprops.cooldown += cls.cooldown;
         shotprops.n_shots++;
+        if (cls.groupShots && shotprops.n_shots >= cls.groupShots) {
+            shotprops.n_shots = 0;
+            shotprops.cooldown = cls.groupCooldown;
+        }
     }
-    afterShot(shot) {
+    afterShot(shot, shot_details) {
         // Subclasses may add special behaviour...
-        shot.afterShotBy(this);
+        shot.afterShotBy(this, shot_details);
     }
     _shoot(cls) {
         var shot = this.field.addShot(cls);
@@ -2130,9 +2135,13 @@ class Entity extends Sprite {
         shot.rot = this.rot;
         return shot;
     }
-    shoot(cls, shot_i, serial_shot_i, shotprops) {
+    shoot(cls, shot_details) {
+
         // shot_i: index of this shot. E.g. if 3 are being fired at once,
         // this one might be 0, 1, or 2.
+        var shot_i = shot_details.i;
+        var serial_shot_i = shot_details.serial_i;
+        var shotprops = shot_details.shotprops;
 
         var shot = this._shoot(cls);
         shot.applyPowerup(shotprops.level);
@@ -2665,7 +2674,7 @@ class HumanPlayer extends Player {
     }
     cleanup() {
         this._removeFromField();
-        this.menu.cleanup();
+        if (this.menu) this.menu.cleanup();
         this.game.canvas_container.removeChild(this.canvas);
 
         super.cleanup();
@@ -4205,7 +4214,7 @@ class ToumaShip extends FighterShip {
 
     shotClass = {
         x: ToumaShot,
-        y: DoubleMissileShot,
+        y: ToumaMissileShot,
     };
 
     picture = new Picture([
@@ -4792,8 +4801,8 @@ class TurretShip extends BaseTurretShip {
     static maxhp = 180;
 
     shotClass = {
-        x: QuadrupleShot,
-        y: QuadrupleMissileShot,
+        x: DoubleShot,
+        y: DoubleMissileShot,
     };
 
     picture = new Picture([
@@ -4803,6 +4812,16 @@ class TurretShip extends BaseTurretShip {
             new Point(1.2, 0),
         ], {fill: false, close: false}),
     ]);
+}
+
+class KingTurretShip extends TurretShip {
+    static myname = 'King Turret';
+    radius = 9 * RADIUSMUL;
+
+    shotClass = {
+        x: QuadrupleShot,
+        y: QuadrupleMissileShot,
+    };
 }
 
 class FlagTurretShip extends TurretShip {
@@ -4961,8 +4980,8 @@ class MoleShip extends Ship {
             super.fire(keyname);
         }
     }
-    afterShot(shot) {
-        super.afterShot(shot);
+    afterShot(shot, shot_details) {
+        super.afterShot(shot, shot_details);
 
         var rock = this.rock;
         if(rock) {
@@ -5276,8 +5295,8 @@ class EngineerShip extends SuitShip {
 
     ropeEnd = null;
 
-    afterShot(shot) {
-        super.afterShot(shot);
+    afterShot(shot, shot_details) {
+        super.afterShot(shot, shot_details);
         if(shot instanceof RopeShot) {
             if(this.ropeEnd) {
                 this.ropeEnd.addOtherEnd(shot);
@@ -5301,7 +5320,7 @@ class TroopShip extends SuitShip {
 
     shotClass = {
         x: TripleToolShot,
-        y: DoubleMissileShot,
+        y: MissileBarrage,
     };
 
     picture = new Picture([
@@ -5593,13 +5612,13 @@ class CannonShip extends Ship {
     static myname = 'Cannon';
 
     radius = 9 * RADIUSMUL;
-    thrustSpeed = .8;
+    thrustSpeed = .78;
     reverseSpeed = .4;
-    velmul = .99;
-    rotspeed = Math.PI / 65;
-    rotmul = .85;
+    velmul = .98;
+    rotspeed = Math.PI / 68;
+    rotmul = .87;
 
-    static maxhp = 100;
+    static maxhp = 90;
 
     shotClass = {
         x: DoubleCannonShot,
@@ -5666,6 +5685,11 @@ class Shot extends Entity {
 
     static cooldown = 4;
 
+    // If groupShots > 0, then every time that many shots have been fired,
+    // groupCooldown is applied
+    static groupShots = 0;
+    static groupCooldown = 10;
+
     constructor(field) {
         super(field);
 
@@ -5708,7 +5732,7 @@ class Shot extends Entity {
         // more shots)
         this.level = level;
     }
-    afterShotBy(entity) {
+    afterShotBy(entity, shot_details) {
         // Bit of a hack, called by Entity.shoot, Entity.emitShots, etc.
         // Just lets subclasses of Shot customize themselves a bit based
         // on the entity which shot them.
@@ -5779,6 +5803,9 @@ class DoubleShot extends SingleShot {
 }
 
 class ToumaShot extends SingleShot {
+    static initialShots = 2;
+    initialRotVariance = Math.PI / 16;
+
     static serialShots = 4;
     serialRotVariance = Math.PI * 1.5;
 }
@@ -5860,8 +5887,8 @@ class BlasterShot extends Shot {
 
     picture = Picture.newPolygon(6);
 
-    afterShotBy(entity) {
-        super.afterShotBy(entity);
+    afterShotBy(entity, shot_details) {
+        super.afterShotBy(entity, shot_details);
 
         // Firing this weapon has a "push back" effect on whatever fired it
         var kickback = this.initialVelMul * (8 + 4 * this.level);
@@ -5921,8 +5948,8 @@ class MissileShot extends Shot {
         }
         super.step();
     }
-    afterShotBy(entity) {
-        super.afterShotBy(entity);
+    afterShotBy(entity, shot_details) {
+        super.afterShotBy(entity, shot_details);
         this.rot_vel = rotDiff(this.rot, entity.rot) * 2;
     }
     die() {
@@ -5939,6 +5966,25 @@ class DoubleMissileShot extends MissileShot {
     static initialShots = 2;
     initialRotVariance = Math.PI / 9;
     initialPosRotVariance = Math.PI / 3;
+}
+
+class MissileBarrage extends MissileShot {
+    static serialShots = 2;
+    static groupShots = 4;
+    static cooldown = 3;
+    static groupCooldown = 30;
+    initialRotVariance = Math.PI / 9;
+    initialPosRotVariance = Math.PI / 3;
+    serialRotVariance = Math.PI / 4;
+}
+
+class ToumaMissileShot extends MissileShot {
+    static serialShots = 4;
+    serialRotVariance = Math.PI * 1.5;
+
+    static groupShots = 4;
+    static cooldown = 3;
+    static groupCooldown = 10;
 }
 
 class QuadrupleMissileShot extends MissileShot {
@@ -5975,8 +6021,8 @@ class CannonShot extends Shot {
         a: [.5, .5],
     };
 
-    afterShotBy(entity) {
-        super.afterShotBy(entity);
+    afterShotBy(entity, shot_details) {
+        super.afterShotBy(entity, shot_details);
 
         for(var i = 0; i < this.numChildShots; i++) {
 
@@ -5985,7 +6031,7 @@ class CannonShot extends Shot {
             // for which the afterShotBy method is currently being called).
             var shot_i = i + 1;
 
-            var shot = entity._shoot(this.constructor);
+            var shot = entity.shoot(this.constructor, shot_details);
             shot.pos.addSpeed(
                 shot_i * this.childShotSpacing, this.rot);
             shot.vel.copy(this.vel);
@@ -6018,12 +6064,19 @@ class CannonShot extends Shot {
 
 class DoubleCannonShot extends CannonShot {
     static serialShots = 2;
-    serialPosRotVariance = Math.PI / 4;
+    serialPosRotVariance = Math.PI / 3;
+
+    static cooldown = 4;
+    static groupShots = 4;
+    static groupCooldown = 12;
 }
 
 class SuperCannonShot extends CannonShot {
     radius = 8 * RADIUSMUL;
     initialSpeed = 10;
+
+    static initialShots = 2;
+    initialPosRotVariance = Math.PI * 1.25;
 
     maxAge = 22;
     static cooldown = 45;
@@ -6721,6 +6774,7 @@ var SHIP_CLASSES = new OrderedDict()
     .set('boxer', BoxerShip)
     .set('torch', TorchShip)
     .set('turret', TurretShip)
+    .set('kingturret', KingTurretShip)
     .set('flag', FlagShip)
     .set('mole', MoleShip)
     .set('crab', CrabShip)
