@@ -291,6 +291,10 @@ var defaultMap = new function() {
             var shipsMap = teamsMap[teamName];
             for(var shipName in shipsMap) {
                 var shipClass = SHIP_CLASSES.get(shipName);
+                if (!shipClass) {
+                    throw new Error("No such ship " + shipName + ", available: "
+                        + SHIP_CLASSES.getKeys().join(', '));
+                }
                 var weight = shipsMap[shipName];
                 var shipTemplate = new ShipTemplate(shipClass, team);
                 ships.addEntry(shipTemplate, weight);
@@ -703,6 +707,48 @@ var defaultMap = new function() {
                     blue: {swarm: 1},
                 }),
             }), {corridor2: 2}),
+
+        // TEST
+        test1: defnode('Test', [],
+            mktemplate({
+                width: new MinMax(.25, .75),
+                height: new MinMax(2, 3),
+                rocks_per: new MinMax(.7),
+                rock_radius: new MinMax(2, 4),
+                ships_per: new MinMax(.8),
+                stars_per: new MinMax(.2),
+                planets_per: new MinMax(.2),
+                ships: mkships({
+                    //green: {torch: 1},
+                    //yellow: {swarm: 1, mole: 1},
+                    //blue: {swarm: 1, mole: 1},
+                    //red: {engineer: 1},
+                    green: {swarm: 4, fighter: 1},
+                    yellow: {bore: 1},
+                    blue: {mole: 3, touma: 2},
+                    red: {mole: 3, torch: 2},
+                }),
+            }), {'test2': 1}),
+        test2: defnode('Test', [],
+            mktemplate({
+                width: new MinMax(2, 3),
+                height: new MinMax(2, 3),
+                rocks_per: new MinMax(1.2),
+                rock_radius: new MinMax(.5, 1.2),
+                ships_per: new MinMax(.8),
+                stars_per: new MinMax(.2),
+                planets_per: new MinMax(.5),
+                ships: mkships({
+                    //green: {torch: 1},
+                    //yellow: {swarm: 1, mole: 1},
+                    //blue: {swarm: 1, mole: 1},
+                    //red: {engineer: 1},
+                    green: {miner: 2, fighter: 1},
+                    yellow: {hunter: 1},
+                    blue: {mole: 3, crab: 2},
+                    red: {engineer: 2},
+                }),
+            }), {'test1': 1}),
     });
 
     var startNodeName = getParam('start_node');
