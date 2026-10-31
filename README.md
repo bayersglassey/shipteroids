@@ -11,9 +11,6 @@ one ship is a swarm of little ships connected by springs; other "ships"
 are astronauts which can land on asteroids and run around on them).
 
 The language is Javascript (ES6) and HTML5 (canvas etc).
-Almost the entire game is in a single file: [game.js](/game.js).
-All the code, graphics, etc are contained in that file.
-Only the maps live separately: [map.js](/map.js).
 
 ## Play the game
 

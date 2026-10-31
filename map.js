@@ -1,3 +1,4 @@
+'use strict';
 
 class MapNode extends Particle {
     /* A node of the graph represented by class Map. */

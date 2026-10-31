@@ -156,7 +156,19 @@ if(DEBUG) {
     Y_SHOT_LEVEL = MAX_SHOT_LEVEL;
 }
 </script>
+
+<!-- Generic game engine stuff -->
+<script src="keys.js"></script>
+<script src="physics.js"></script>
+<script src="graphics.js"></script>
+<script src="menus.js"></script>
 <script src="game.js"></script>
+
+<!-- Shipteroids-specific stuff -->
+<script src="shipteroids.js"></script>
+<script src="ships.js"></script>
+<script src="shots.js"></script>
+<script src="shop.js"></script>
 <script src="map.js"></script>
 <script>
 var canvas_container = document.getElementById('canvas-container');
@@ -166,7 +178,7 @@ document.getElementById('fullscreen-link').addEventListener('click', event => {
     canvas_container.requestFullscreen();
 });
 
-var game = new Game(defaultMap.map, canvas_container, controls_elem);
+var game = new ShipteroidsGame(defaultMap.map, canvas_container, controls_elem);
 for(var i = 0; i < N_PLAYERS; i++) game.addPlayer();
 
 canvas_container.childNodes[0].data = ''; // Remove the 'Loading...' text

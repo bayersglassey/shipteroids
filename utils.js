@@ -1,6 +1,5 @@
 'use strict';
 
-
 function linear(x0, x1, n) {
     /* Assumes: 0 <= n <= 1 */
     return x0 + (x1 - x0) * n;
