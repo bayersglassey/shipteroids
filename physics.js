@@ -78,6 +78,16 @@ class Point {
         this.y = Random.randNumber(other.y);
         return this;
     }
+    toString() {
+        return "(" + this.x + ", " + this.y + ")";
+    }
+    validate() {
+        // For debugging purposes: call this in places you want to see a
+        // stack trace if a point gets an undefined coordinate
+        if (notReallyANumber(this.x) || notReallyANumber(this.y)) {
+            throw new Error("Invalid point: " + this);
+        }
+    }
     eq(other) {
         return this.x === other.x && this.y === other.y;
     }

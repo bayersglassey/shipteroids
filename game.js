@@ -9,6 +9,7 @@ class Game {
 
     constructor(canvas_container) {
         this.canvas_container = canvas_container;
+        this.canvases = [];
 
         canvas_container.addEventListener('keydown', this.onKeyDown.bind(this));
         canvas_container.addEventListener('keyup', this.onKeyUp.bind(this));
@@ -34,8 +35,14 @@ class Game {
         canvas.className = 'canvas';
         canvas.width = CANVAS_WIDTH;
         canvas.height = CANVAS_HEIGHT;
+        this.canvases.push(canvas);
         this.canvas_container.appendChild(canvas);
         return canvas;
+    }
+
+    removeCanvas(canvas) {
+        removeArrayElem(this.canvases, canvas);
+        this.canvas_container.removeChild(canvas);
     }
 
     onKeyDown(event) {
@@ -114,7 +121,7 @@ class Game {
     }
 
     render() {
-        /* To be overridden by subclasses... */
+        /* To be completely overridden by subclasses... */
     }
 
     intervalCallback() {

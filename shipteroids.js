@@ -535,6 +535,12 @@ class ShipteroidsField extends Field {
             x += dx;
         }
     }
+    step() {
+        // NOTE: do CPU player stuff before anything else in step()... same
+        // as how human players press keys etc before step() is called
+        for(var player of this.cpus) player.step();
+        super.step();
+    }
     innerStep() {
         for(var shot of this.shots) {
             for(var ship of this.ships) {
@@ -1406,50 +1412,6 @@ class ShipteroidsEntity extends Entity {
     }
 }
 
-class Camera extends FieldParticle {
-    velmul = .7;
-    springmul = .1;
-
-    // target: Entity or null
-    target = null;
-
-    constructor(field, target) {
-        super(field);
-
-        target = getDefault(target, null);
-
-        if(target) this.setTarget(target);
-        else this.pos.setMidpoint(field.size);
-    }
-    setTarget(target) {
-        this.target = target;
-        this.initFromTarget();
-    }
-    unsetTarget() {
-        this.target = null;
-    }
-    initFromTarget() {
-        if(!this.target) return;
-        this.pos.copy(this.target.pos);
-    }
-    step() {
-        this.vel.mul(this.velmul);
-
-        if(this.target && this.target.removed) this.unsetTarget();
-
-        if(this.target) {
-            var x0 = this.pos.x;
-            var y0 = this.pos.y;
-            var x1 = this.target.pos.x;
-            var y1 = this.target.pos.y;
-            this.vel.x += moduloDiff(x0, x1, this.field.size.x)
-                * this.springmul;
-            this.vel.y += moduloDiff(y0, y1, this.field.size.y)
-                * this.springmul;
-        }
-    }
-}
-
 class Pickup extends ShipteroidsEntity {
     static myname = 'Pickup';
 
@@ -1684,7 +1646,7 @@ class HumanPlayer extends Player {
     cleanup() {
         this._removeFromField();
         if (this.menu) this.menu.cleanup();
-        this.game.canvas_container.removeChild(this.canvas);
+        this.game.removeCanvas(this.canvas);
 
         super.cleanup();
     }
@@ -2040,8 +2002,7 @@ class ShipteroidsGame extends Game {
     }
     _updateCanvasWidths(n_players) {
         n_players = getDefault(n_players, this.players.length);
-        var canvases = document.getElementsByClassName('canvas');
-        for(var canvas of canvases) {
+        for(var canvas of this.canvases) {
             var players_per_row = Math.min(n_players, 2);
             canvas.style.maxWidth = String(
                 Math.floor(100 / players_per_row)) + '%';
@@ -2093,8 +2054,6 @@ class ShipteroidsGame extends Game {
 
         for(var i = 0; i < this.fields.length; i++) {
             var field = this.fields[i];
-            for(var player of field.cpus) player.step();
-
             field.step();
             if(!field.players.length) {
                 // Remove fields which have no remaining references to them
@@ -2104,11 +2063,6 @@ class ShipteroidsGame extends Game {
                 i--;
                 continue;
             }
-
-            for(var camera of field.cameras) {
-                camera.step();
-                camera.stepPhysics();
-            }
         }
 
         super.step();
@@ -2116,7 +2070,6 @@ class ShipteroidsGame extends Game {
     render() {
         // Overrides Game.render()
         for(var player of this.players) this.renderPlayer(player);
-        super.render();
     }
     renderPlayer(player) {
         var canvas = player.canvas;

@@ -39,6 +39,50 @@ class FieldParticle extends Particle {
     }
 }
 
+class Camera extends FieldParticle {
+    velmul = .7;
+    springmul = .1;
+
+    // target: Entity or null
+    target = null;
+
+    constructor(field, target) {
+        super(field);
+
+        target = getDefault(target, null);
+
+        if(target) this.setTarget(target);
+        else this.pos.setMidpoint(field.size);
+    }
+    setTarget(target) {
+        this.target = target;
+        this.initFromTarget();
+    }
+    unsetTarget() {
+        this.target = null;
+    }
+    initFromTarget() {
+        if(!this.target) return;
+        this.pos.copy(this.target.pos);
+    }
+    step() {
+        this.vel.mul(this.velmul);
+
+        if(this.target && this.target.removed) this.unsetTarget();
+
+        if(this.target) {
+            var x0 = this.pos.x;
+            var y0 = this.pos.y;
+            var x1 = this.target.pos.x;
+            var y1 = this.target.pos.y;
+            this.vel.x += moduloDiff(x0, x1, this.field.size.x)
+                * this.springmul;
+            this.vel.y += moduloDiff(y0, y1, this.field.size.y)
+                * this.springmul;
+        }
+    }
+}
+
 class Sprite extends FieldParticle {
     /* Represents a Particle which can be drawn onto a <canvas>. */
 
@@ -218,8 +262,8 @@ class Field {
         this.innerCanvas.height = this.size.y;
     }
 
-    addCamera() {
-        var camera = new Camera(this);
+    addCamera(target) {
+        var camera = new Camera(this, target);
         this.cameras.push(camera);
         return camera;
     }
@@ -268,6 +312,11 @@ class Field {
 
         for(var entityArray of this.entityArrays) {
             for(var entity of entityArray) entity.stepPhysics();
+        }
+
+        for(var camera of this.cameras) {
+            camera.step();
+            camera.stepPhysics();
         }
     }
 

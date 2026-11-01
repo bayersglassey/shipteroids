@@ -1,5 +1,9 @@
 'use strict';
 
+function notReallyANumber(x) {
+    return typeof x !== 'number' || isNaN(x) || x === Infinity || x === -Infinity;
+}
+
 function linear(x0, x1, n) {
     /* Assumes: 0 <= n <= 1 */
     return x0 + (x1 - x0) * n;
