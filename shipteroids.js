@@ -117,6 +117,42 @@ index.html?players=2&pickup_magnet=2&all_ships=1&x_shot_level=3&y_shot_level=3:4
 ******************************/
 
 
+// Query params
+var ALL_SHIPS = getBoolParam('all_ships');
+var RICH = getBoolParam('rich');
+var SHOT_LEVEL = getIntParam('shotlevel');
+var X_SHOT_LEVEL = getIntParam('xshotlevel', SHOT_LEVEL);
+var Y_SHOT_LEVEL = getIntParam('yshotlevel', SHOT_LEVEL);
+var PICKUP_MAGNET = getIntParam('magnet');
+var HIDE_TEXT = getBoolParam('hide_text');
+var NODAMAGE = getBoolParam('nodamage');
+var VIBRATE = !getBoolParam('novibrate');
+var N_PLAYERS = getIntParam('players', 1);
+var MAX_PLAYERS = 2;
+var DEFAULT_GRAVITY = getFloatParam('gravity', 0); // multiplier for planet gravity
+var SHIP_ADDVELMUL = getFloatParam('ship_addvelmul', 0); // number between 0 and 1, increases ships' velmul towards 1
+var DAMAGEMUL = getFloatParam('damagemul', 1);
+var DEFAULT_ROCK_RADIUS = 10 * RADIUSMUL;
+var MIN_ROCK_RADIUS = 9 * RADIUSMUL;
+var WARP_AFTER_STEPS = getIntParam('warp_after', 35);
+var DEFAULT_ADDHP = getFloatParam('addhp', 1 / 40);
+var DEFAULT_ADDFUEL = getFloatParam('addfuel', 1 / 80);
+var DEFAULT_MAXFUEL = 100;
+var MAXGOLD = 999;
+var WARP_COLLISION_DAMAGE = getFloatParam('warp_collision_damage', 10);
+var WARP_FUEL = getFloatParam('warp_fuel', 10);
+var MIN_MAP_NODE_RADIUS = 5;
+var MAX_MAP_NODE_RADIUS = 20;
+var MAX_SHOT_LEVEL = getIntParam('max_shot_level', 3);
+var MAX_PICKUP_MAGNET = getIntParam('max_pickup_magnet', 2);
+if(DEBUG) {
+    RICH = true;
+    ALL_SHIPS = true;
+    PICKUP_MAGNET = MAX_PICKUP_MAGNET;
+    X_SHOT_LEVEL = MAX_SHOT_LEVEL;
+    Y_SHOT_LEVEL = MAX_SHOT_LEVEL;
+}
+
 // Game/field default options
 var DEFAULT_FIELD_WIDTH  = 1000;
 var DEFAULT_FIELD_HEIGHT = 1000;
@@ -336,19 +372,13 @@ class FieldTemplate {
     }
 }
 
-class Field {
-    /* Think of "field" in the sense of "playing field".
-    It's basically a rectangle within which sprites can fly around.
-    The edges of the rectangle "wrap around" (or you can say it's a
-    "torus" if you prefer). */
+class ShipteroidsField extends Field {
 
     constructor(game, size) {
-        this.game = game;
-        this.size = size;
+        super(game, size);
 
         this.stars = [];
 
-        this.entityArrays = [];
         this.planets = this.addEntityArray();
         this.ships = this.addEntityArray();
         this.shots = this.addEntityArray();
@@ -361,14 +391,6 @@ class Field {
 
         this.cpus = [];
         this.players = [];
-        this.cameras = [];
-
-        /* Create a canvas for rendering this Field.
-        This canvas is never attached to a parent element, we only
-        use it for drawing, then copy its image onto another canvas. */
-        this.innerCanvas = document.createElement('canvas');
-        this.innerCanvas.width = this.size.x;
-        this.innerCanvas.height = this.size.y;
     }
     populate(template) {
         this.template = template;
@@ -449,31 +471,6 @@ class Field {
         this.cpus.push(player);
         return player;
     }
-    addCamera() {
-        var camera = new Camera(this);
-        this.cameras.push(camera);
-        return camera;
-    }
-    removeCamera(camera) {
-        removeArrayElem(this.cameras, camera);
-    }
-    addEntityArray() {
-        // Create an Array used to store Entity instances
-        // (E.g. Game.ships, Game.rocks, etc)
-        var entityArray = [];
-
-        // Add a pending Array of things to be added to the Array at the
-        // start of next Field.step
-        entityArray.pending = [];
-
-        this.entityArrays.push(entityArray);
-        return entityArray;
-    }
-    cleanup() {
-        for(var entityArray of this.entityArrays) {
-            for(var entity of entityArray) entity.cleanup();
-        }
-    }
     addShip(cls) {
         var entity = new cls(this);
         this.ships.pending.push(entity);
@@ -504,11 +501,6 @@ class Field {
         var entity = new cls(this);
         this.planets.pending.push(entity);
         return entity;
-    }
-    addPendingEntities(entityArray) {
-        if(!entityArray.pending.length) return;
-        for(var entity of entityArray.pending) entityArray.push(entity);
-        entityArray.pending.length = 0;
     }
     addRocksText(text) {
         if(!text.length) return;
@@ -543,15 +535,7 @@ class Field {
             x += dx;
         }
     }
-    step() {
-        for(var entityArray of this.entityArrays) {
-            this.addPendingEntities(entityArray);
-        }
-
-        for(var entityArray of this.entityArrays) {
-            for(var entity of entityArray) entity.step();
-        }
-
+    innerStep() {
         for(var shot of this.shots) {
             for(var ship of this.ships) {
                 if(shot.ship && ship.isAlly(shot.ship)) continue;
@@ -645,96 +629,10 @@ class Field {
             }
         }
 
-        for(var entityArray of this.entityArrays) {
-            this.removeEntities(entityArray);
-        }
-
         for(var star of this.stars) star.stepPhysics();
-        for(var entityArray of this.entityArrays) {
-            for(var entity of entityArray) entity.stepPhysics();
-        }
     }
-    removeEntities(entityArray) {
-        for(var i = 0; i < entityArray.length; i++) {
-            var entity = entityArray[i];
-            if(entity._shouldRemove) {
-                entity.removed = true;
-                entity.cleanup();
-                entityArray.splice(i, 1);
-                i--;
-            }
-        }
-    }
-    innerRender(camera) {
-        var canvas = this.innerCanvas;
-        var ctx = canvas.getContext('2d');
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-        if(RENDER_BOUNDARY) this.renderBoundary(canvas);
-
+    renderBackground(canvas, camera) {
         for(var star of this.stars) star.render(canvas, camera);
-        for(var entityArray of this.entityArrays) {
-            for(var entity of entityArray) entity.render(canvas, camera);
-        }
-    }
-    renderBoundary(canvas) {
-        /* Draw a box around the field */
-        var ctx = canvas.getContext('2d');
-        var w = this.size.x;
-        var h = this.size.y;
-        ctx.strokeStyle = '#800';
-        ctx.beginPath();
-        ctx.moveTo(0, 0);
-        ctx.lineTo(w, 0);
-        ctx.lineTo(w, h);
-        ctx.lineTo(0, h);
-        ctx.closePath();
-        ctx.stroke();
-    }
-    render(canvas, camera) {
-        this.innerRender(camera);
-        var innerCanvas = this.innerCanvas;
-
-        var ctx = canvas.getContext('2d');
-        var x0 = canvas.width  / 2 - camera.pos.x;
-        var y0 = canvas.height / 2 - camera.pos.y;
-
-        x0 = modulo(x0, innerCanvas.width);
-        if(x0 > 0) x0 -= innerCanvas.width;
-        y0 = modulo(y0, innerCanvas.height);
-        if(y0 > 0) y0 -= innerCanvas.height;
-
-        for(var x = x0; x < canvas.width; x += innerCanvas.width) {
-            for(var y = y0; y < canvas.height; y += innerCanvas.height) {
-                ctx.drawImage(this.innerCanvas, x, y);
-            }
-        }
-    }
-}
-
-class FieldParticle extends Particle {
-    /* A particle which lives on a field. */
-
-    radius = 10 * RADIUSMUL;
-
-    constructor(field) {
-        super();
-        this.field = field;
-        this.modulo = field.size;
-    }
-    dist(other) {
-        return this.pos.dist(other.pos, this.field.size);
-    }
-    angle(other) {
-        return this.pos.angle(other.pos, this.field.size);
-    }
-    stepPhysics() {
-        // Make sure we don't go too fast
-        var maxspeed = MAXSPEED;
-        var speed = this.vel.dist();
-        if(speed > maxspeed) this.vel.mul(maxspeed / speed);
-
-        this.pos.addMul(this.vel, VELMUL).modulo(this.field.size);
     }
 }
 
@@ -796,107 +694,6 @@ var FUEL_COLOR = 'rgb(180,65,0)';
 var GOLD_PICTURE = blockyWriter.getPicture('G');
 var GOLD_COLOR = 'rgb(255,165,50)';
 
-class Sprite extends FieldParticle {
-    /* Represents a Particle which can be drawn onto a <canvas>. */
-
-    shouldRenderCircle = false;
-    shouldRenderCircleLine = true;
-    circleStrokeStyle = 'rgb(0,200,0)';
-    circleFillStyle   = 'rgba(255,255,255,.15)';
-    circleLineWidth = 2;
-
-    shouldRenderTrail = false;
-    trailStart = 0;
-    trailEnd   = 1;
-    trailCamVel = 1;
-    trailStrokeStyle = 'rgba(255,150,0,25)';
-    trailLineWidth = 2;
-
-    picture = null; /* instanceof Picture */
-
-    render(canvas, camera) {
-        var fieldx = this.field.size.x;
-        var fieldy = this.field.size.y;
-        var addx0 = this.pos.x < fieldx / 2? 0: -fieldx;
-        var addy0 = this.pos.y < fieldy / 2? 0: -fieldy;
-
-        for(var addx = addx0; addx <= addx0 + fieldx; addx += fieldx) {
-            for(var addy = addy0; addy <= addy0 + fieldy; addy += fieldy) {
-                this._render(canvas, camera, addx, addy);
-            }
-        }
-    }
-    _render(canvas, camera, addx, addy) {
-        if(this.shouldRenderTrail) {
-            this.renderTrail(canvas, camera, addx, addy);
-        }
-        if(this.shouldRenderCircle || RENDER_CIRCLES) {
-            this.renderCircle(canvas, camera, addx, addy);
-        }
-        if(this.picture) {
-            this.renderPicture(canvas, camera, addx, addy);
-        }
-    }
-    renderPicture(canvas, camera, addx, addy) {
-        this.picture.renderEntity(this, canvas, camera, addx, addy);
-    }
-    renderTrail(canvas, camera, addx, addy) {
-        var x0 = this.pos.x + addx;
-        var y0 = this.pos.y + addy;
-        var x1 = x0 - this.vel.x + camera.vel.x * this.trailCamVel;
-        var y1 = y0 - this.vel.y + camera.vel.y * this.trailCamVel;
-        var trail_x0 = linear(x0, x1, this.trailStart);
-        var trail_y0 = linear(y0, y1, this.trailStart);
-        var trail_x1 = linear(x0, x1, this.trailEnd);
-        var trail_y1 = linear(y0, y1, this.trailEnd);
-
-        var ctx = canvas.getContext('2d');
-        ctx.strokeStyle = this.trailStrokeStyle;
-        ctx.lineWidth = this.trailLineWidth;
-        ctx.beginPath();
-        ctx.moveTo(trail_x0, trail_y0);
-        ctx.lineTo(trail_x1, trail_y1);
-        ctx.stroke();
-    }
-    renderCircle(canvas, camera, addx, addy) {
-        var x0 = this.pos.x + addx;
-        var y0 = this.pos.y + addy;
-        var ctx = canvas.getContext('2d');
-
-        ctx.strokeStyle = this.circleStrokeStyle;
-        ctx.lineWidth = this.circleLineWidth;
-        ctx.fillStyle = this.circleFillStyle;
-        renderCircle(ctx, x0, y0, this.rot, this.radius);
-    }
-    renderLineTo(canvas, camera, addx, addy, other, strokeStyle, lineWidth, alpha) {
-        strokeStyle = getDefault(strokeStyle, 'rgb(255,255,255)');
-        lineWidth = getDefault(lineWidth, 1);
-        alpha = getDefault(alpha, 1);
-
-        var ctx = canvas.getContext('2d');
-        ctx.strokeStyle = strokeStyle;
-        ctx.lineWidth = lineWidth;
-
-        var fieldx = this.field.size.x;
-        var fieldy = this.field.size.y;
-        var x0 = this.pos.x + addx;
-        var y0 = this.pos.y + addy;
-
-        var dx = moduloDiff(this.pos.x, other.pos.x, fieldx);
-        var dy = moduloDiff(this.pos.y, other.pos.y, fieldy);
-        var x1 = x0 + dx;
-        var y1 = y0 + dy;
-
-        ctx.globalAlpha = alpha;
-        ctx.beginPath();
-        ctx.moveTo(x0, y0);
-        ctx.lineTo(x1, y1);
-        ctx.closePath();
-        ctx.stroke();
-        ctx.globalAlpha = 1;
-    }
-}
-
 class Star extends Sprite {
     radius = 3 * RADIUSMUL;
     shouldRenderTrail = true;
@@ -917,17 +714,18 @@ class Shotprops {
     }
 }
 
-class Entity extends Sprite {
-    /* An Entity is a sprite with "volition" -- it has virtual keys which
-    can be pressed, and based on their state, it can move itself. */
+class ShipteroidsEntity extends Entity {
+    /* This class used to be called Entity, but it got out of control, and
+    currently contains a bunch of stuff which belongs on Rock, stuff which
+    belongs on Ship, and a tiiiiny bit of stuff shared by those and a bunch
+    of other subclasses.
+    TODO: move some stuff off this class onto more specific classes */
 
     static myname = 'Entity';
 
     thrustSpeed = 2;
     reverseSpeed = 1.25;
-    velmul = .95;
     rotspeed = Math.PI / 25;
-    rotmul = .5;
 
     maxAge = -1;
     fadeWithAge = false;
@@ -972,18 +770,6 @@ class Entity extends Sprite {
 
         this.hp = this.maxhp = this.constructor.maxhp;
 
-        // addpos: entities can add to each others' addpos during step(),
-        // and then addpos is added to pos during stepPhysics().
-        // The purpose of this is to avoid modifying pos during step(),
-        // because it's used in many calculations, so if it's modified
-        // then the interactions between entities would be subtly different
-        // depending on the order in which entities' step() is called...
-        // Hope you get what I mean.
-        this.addpos = new Point();
-
-        this.rot = 0;
-        this.rot_vel = 0;
-
         this.shotprops = {};
         for(var keyname in this.shotClass) {
             this.shotprops[keyname] = new Shotprops();
@@ -993,15 +779,6 @@ class Entity extends Sprite {
 
         this.age = 0;
         this.dead = false;
-        this._shouldRemove = false;
-
-        // removed: used by other entities with references to this one,
-        // so they know they should stop referencing it
-        this.removed = false;
-    }
-    getVelMul() {
-        // May be overridden by subclasses
-        return linear(this.velmul, 1, ADDVELMUL);
     }
     getShip() {
         // Return the ship to which we "belong", e.g. this if this
@@ -1087,11 +864,6 @@ class Entity extends Sprite {
         this.dead = true;
         this.remove();
     }
-    remove() {
-        this._shouldRemove = true;
-    }
-    cleanup() {
-    }
     gravity(other, mul, opts) {
         mul = getDefault(mul, 1);
         opts = opts || {};
@@ -1159,20 +931,6 @@ class Entity extends Sprite {
         if(this.maxAge >= 0 && this.age >= this.maxAge) {
             this.die();
         }
-    }
-    stepPhysics() {
-        if(this.rot_vel < -MAX_ROT_VEL) this.rot_vel = -MAX_ROT_VEL;
-        if(this.rot_vel > MAX_ROT_VEL) this.rot_vel = MAX_ROT_VEL;
-
-        this.vel.mul(this.getVelMul());
-        this.rot += this.rot_vel * ROTVELMUL;
-        this.rot_vel *= this.rotmul;
-
-        super.stepPhysics();
-
-        // Add addpos to pos, then reset addpos
-        this.pos.add(this.addpos);
-        this.addpos.set();
     }
     handleKeys() {
         this._handleKeys();
@@ -1692,7 +1450,7 @@ class Camera extends FieldParticle {
     }
 }
 
-class Pickup extends Entity {
+class Pickup extends ShipteroidsEntity {
     static myname = 'Pickup';
 
     radius = 6 * RADIUSMUL;
@@ -1951,7 +1709,7 @@ class HumanPlayer extends Player {
             var template = this.progress.template;
             var size = template.getSize();
 
-            field = new Field(this.game, size);
+            field = new ShipteroidsField(this.game, size);
             field.populate(template);
 
             // add field to game.fields *next* step -- not *this* step,
@@ -2253,11 +2011,7 @@ class ShipteroidsGame extends Game {
         this.pendingFields = [];
     }
     addPlayer() {
-        var canvas = document.createElement('canvas');
-        canvas.className = 'canvas';
-        canvas.width = CANVAS_WIDTH;
-        canvas.height = CANVAS_HEIGHT;
-        this.canvas_container.appendChild(canvas);
+        var canvas = this.addCanvas();
         this._updateCanvasWidths(this.players.length + 1);
 
         var player = this._addPlayer(canvas);
@@ -2982,7 +2736,7 @@ class WarpMapMenu extends MapMenu {
     }
 }
 
-class Effect extends Entity {
+class Effect extends ShipteroidsEntity {
     static myname = 'Effect';
     fadeWithAge = true;
 }
@@ -3076,7 +2830,7 @@ class SparkEffect extends Effect {
     maxAge = 20;
 }
 
-class Rock extends Entity {
+class Rock extends ShipteroidsEntity {
     static myname = 'Rock';
 
     circleStrokeStyle = '#987';
@@ -3151,7 +2905,7 @@ class Rock extends Entity {
     }
 }
 
-class Planet extends Entity {
+class Planet extends ShipteroidsEntity {
 
     shouldRenderCircle = true;
     shouldRenderCircleLine = false;

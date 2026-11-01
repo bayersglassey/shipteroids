@@ -1,5 +1,10 @@
 'use strict';
 
+var CANVAS_WIDTH = getIntParam('scw', 700);
+var CANVAS_HEIGHT = getIntParam('sch', 700);
+var TIMING = getBoolParam('timing');
+var MILLIS = getIntParam('millis', 30);
+
 class Game {
 
     constructor(canvas_container) {
@@ -23,14 +28,26 @@ class Game {
 
         this.tick = 0;
     }
+
+    addCanvas() {
+        var canvas = document.createElement('canvas');
+        canvas.className = 'canvas';
+        canvas.width = CANVAS_WIDTH;
+        canvas.height = CANVAS_HEIGHT;
+        this.canvas_container.appendChild(canvas);
+        return canvas;
+    }
+
     onKeyDown(event) {
         if(!event.repeat) this.keyDown(event.keyCode);
         event.preventDefault();
     }
+
     onKeyUp(event) {
         if(!event.repeat) this.keyUp(event.keyCode);
         event.preventDefault();
     }
+
     onGamepadActivity(event) {
         // This handler is for either of these events:
         //   'gamepadconnected'
@@ -50,46 +67,56 @@ class Game {
         // Hahahahaha sure
         this.gamepadsConnected = true;
     }
+
     mapKey(key, keyCode) {
         this.keysByCode[keyCode] = key;
     }
+
     mapKeys(keys, keymap) {
         for(var keyname in keymap) {
             this.mapKey(keys[keyname], keymap[keyname]);
         }
     }
+
     getKeyCode(findKey) {
         for(var keyCode in this.keysByCode) {
             if(this.keysByCode[keyCode] === findKey) return keyCode;
         }
         return -1;
     }
+
     getKeyByCode(findKeyCode) {
         for(var keyCode in this.keysByCode) {
             if(keyCode === findKeyCode) return this.keysByCode[keyCode];
         }
         return null;
     }
+
     remapKey(key, keyCode) {
         var oldKeyCode = this.getKeyCode(key);
         if(oldKeyCode !== -1) delete this.keysByCode[oldKeyCode];
         this.mapKey(key, keyCode);
     }
+
     keyDown(keyCode) {
         var key = this.keysByCode[keyCode];
         if(key) key.down();
     }
+
     keyUp(keyCode) {
         var key = this.keysByCode[keyCode];
         if(key) key.up();
     }
+
     step() {
         /* To be overridden by subclasses... */
         this.tick++;
     }
+
     render() {
         /* To be overridden by subclasses... */
     }
+
     intervalCallback() {
         /* Callback for use with setInterval */
         if(TIMING) var t0 = new Date();
@@ -109,12 +136,14 @@ class Game {
             console.log('TIMING: ' + String(t1 - t0));
         }
     }
+
     play(millis) {
-        millis = getDefault(millis, 30);
+        millis = getDefault(millis, MILLIS);
         if(this.intervalId) clearInterval(this.intervalId);
         var callback = this.intervalCallback.bind(this);
         this.intervalId = setInterval(callback, millis);
     }
+
     pause() {
         if(!this.intervalId) return;
         clearInterval(this.intervalId);

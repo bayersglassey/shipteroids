@@ -75,92 +75,13 @@ Loading...
 </table>
 </div>
 
-<script src="utils.js"></script>
-<script>
-'use strict';
-
-
-// query params
-var PARAMS = new URLSearchParams(window.location.search);
-function getParam(name, default_value) {
-    var value = PARAMS.get(name);
-    return value === null? default_value: value;
-}
-function getBoolParam(name, default_value) {
-    default_value = getDefault(default_value, false);
-    return Boolean(getParam(name, default_value));
-}
-function getIntParam(name, default_value) {
-    default_value = getDefault(default_value, 0);
-    return parseInt(getParam(name, default_value));
-}
-function getFloatParam(name, default_value) {
-    default_value = getDefault(default_value, 0);
-    return parseFloat(getParam(name, default_value));
-}
-
-// debug stuff
-var CANVAS_WIDTH = getIntParam('scw', 700);
-var CANVAS_HEIGHT = getIntParam('sch', 700);
-var DEBUG = getBoolParam('debug');
-var ALL_SHIPS = getBoolParam('all_ships');
-var RICH = getBoolParam('rich');
-var SHOT_LEVEL = getIntParam('shotlevel');
-var X_SHOT_LEVEL = getIntParam('xshotlevel', SHOT_LEVEL);
-var Y_SHOT_LEVEL = getIntParam('yshotlevel', SHOT_LEVEL);
-var PICKUP_MAGNET = getIntParam('magnet');
-var TIMING = getBoolParam('timing');
-var RENDER_CIRCLES = getBoolParam('render_circles');
-var RENDER_BOUNDARY = getBoolParam('render_boundary');
-var HIDE_TEXT = getBoolParam('hide_text');
-var NODAMAGE = getBoolParam('nodamage');
-var VIBRATE = !getBoolParam('novibrate');
-var N_PLAYERS = getIntParam('players', 1);
-var MAX_PLAYERS = 2;
-
-// physics tweaking stuff
-var DEFAULT_GRAVITY = getFloatParam('gravity', 0); // multiplier for planet gravity
-var VELMUL = getFloatParam('velmul', .7); // multiplier for vel when being added to pos
-var ADDVELMUL = getFloatParam('addvelmul', 0); // number between 0 and 1, increases velmul towards 1
-var SHIP_ADDVELMUL = getFloatParam('ship_addvelmul', 0); // number between 0 and 1, increases ships' velmul towards 1
-var MAXSPEED = getFloatParam('maxspeed', 80);
-var ROTVELMUL = getFloatParam('rotvelmul', .5);
-var RADIUSMUL = getFloatParam('radiusmul', 2);
-var DAMAGEMUL = getFloatParam('damagemul', 1);
-var DEFAULT_ROCK_RADIUS = 10 * RADIUSMUL;
-var MIN_ROCK_RADIUS = 9 * RADIUSMUL;
-var WARP_AFTER_STEPS = getIntParam('warp_after', 35);
-var MAX_ROT_VEL = Math.PI / 5;
-var DEFAULT_ADDHP = getFloatParam('addhp', 1 / 40);
-var DEFAULT_ADDFUEL = getFloatParam('addfuel', 1 / 80);
-var DEFAULT_MAXFUEL = 100;
-var MAXGOLD = 999;
-var WARP_COLLISION_DAMAGE = getFloatParam('warp_collision_damage', 10);
-var WARP_FUEL = getFloatParam('warp_fuel', 10);
-var MIN_MAP_NODE_RADIUS = 5;
-var MAX_MAP_NODE_RADIUS = 20;
-var MAX_SHOT_LEVEL = getIntParam('max_shot_level', 3);
-var MAX_PICKUP_MAGNET = getIntParam('max_pickup_magnet', 2);
-
-var SLOMO = getFloatParam('slomo', 0); // number between 0 and 1, slows down physics
-VELMUL = linear(VELMUL, 0, SLOMO);
-ADDVELMUL = linear(ADDVELMUL, 1, SLOMO);
-
-var MILLIS = getIntParam('millis', 30);
-
-if(DEBUG) {
-    RICH = true;
-    ALL_SHIPS = true;
-    PICKUP_MAGNET = MAX_PICKUP_MAGNET;
-    X_SHOT_LEVEL = MAX_SHOT_LEVEL;
-    Y_SHOT_LEVEL = MAX_SHOT_LEVEL;
-}
-</script>
-
 <!-- Generic game engine stuff -->
+<script src="utils.js"></script>
+<script src="params.js"></script>
 <script src="keys.js"></script>
 <script src="physics.js"></script>
 <script src="graphics.js"></script>
+<script src="field.js"></script>
 <script src="menus.js"></script>
 <script src="game.js"></script>
 
@@ -184,7 +105,7 @@ for(var i = 0; i < N_PLAYERS; i++) game.addPlayer();
 canvas_container.childNodes[0].data = ''; // Remove the 'Loading...' text
 canvas_container.focus();
 
-game.play(MILLIS);
+game.play();
 </script>
 </body>
 </html>

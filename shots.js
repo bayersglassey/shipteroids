@@ -1,6 +1,6 @@
 'use strict';
 
-class Shot extends Entity {
+class Shot extends ShipteroidsEntity {
     static myname = 'Shot';
 
     static initialShots = 1;

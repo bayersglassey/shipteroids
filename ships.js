@@ -1,6 +1,6 @@
 'use strict';
 
-class Ship extends Entity {
+class Ship extends ShipteroidsEntity {
     static maxhp = 100;
 
     static myname = 'Ship';
